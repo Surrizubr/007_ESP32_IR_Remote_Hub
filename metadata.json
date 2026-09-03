@@ -1,0 +1,6 @@
+{
+  "name": "ESP32 IR Remote Hub",
+  "description": "Universal infrared remote control, learning, and automation hub connected to ESP32 via Bluetooth and Wi-Fi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
