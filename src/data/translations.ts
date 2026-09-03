@@ -772,7 +772,7 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     schedule: {
       title: 'Agendamento de Horários',
       subtitle: 'Programações automáticas disparadas em horários específicos pelo ESP32.',
-      createRuleBtn: 'Novo Agendamento',
+      createRuleBtn: 'Nova Regra',
       ruleNameLabel: 'Nome do Agendamento:',
       ruleNamePlaceholder: 'Ex: Desligar Tudo às 23:30',
       explanationNotice: 'Configure agendamentos diários. Nos horários definidos, o ESP32 transmitirá as ações infravermelhas em sequência com os atrasos especificados.',
@@ -1221,7 +1221,7 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     schedule: {
       title: 'Clock Scheduling',
       subtitle: 'Automated IR routines triggered at designated clock times by the ESP32.',
-      createRuleBtn: 'New Schedule',
+      createRuleBtn: 'New Rule',
       ruleNameLabel: 'Schedule Name:',
       ruleNamePlaceholder: 'E.g.: Turn Off All at 23:30',
       explanationNotice: 'Set daily clock schedules. At the specified times, the ESP32 will automatically transmit the infrared actions with your chosen delays.',
@@ -1670,7 +1670,7 @@ export const translations: Record<AppLanguage, TranslationDictionary> = {
     schedule: {
       title: 'Agendamiento de Horarios',
       subtitle: 'Programaciones automáticas disparadas en horarios específicos por el ESP32.',
-      createRuleBtn: 'Nuevo Agendamiento',
+      createRuleBtn: 'Nueva Regla',
       ruleNameLabel: 'Nombre del Agendamiento:',
       ruleNamePlaceholder: 'Ej: Apagar Todo a las 23:30',
       explanationNotice: 'Configura horarios diarios. En las horas programadas, el ESP32 transmitirá automáticamente los comandos infrarrojos con las pausas configuradas.',

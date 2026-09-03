@@ -573,18 +573,9 @@ export const AutomationScreen: React.FC<AutomationScreenProps> = ({
               {isScheduleMode ? <Clock className="w-4.5 h-4.5" /> : <Radio className="w-4.5 h-4.5" />}
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <h2 className={`font-bold text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>
-                  {isScheduleMode ? strings.schedule.title : strings.automation.title}
-                </h2>
-                {isScheduleMode && (
-                  <span className={`px-1.5 py-0.2 rounded-md text-[9px] font-bold uppercase tracking-wider ${
-                    isLight ? 'bg-amber-100 text-amber-900' : 'bg-amber-950 text-amber-300'
-                  }`}>
-                    {`⏰ ${strings.automation.scheduleBadge}`}
-                  </span>
-                )}
-              </div>
+              <h2 className={`font-bold text-sm ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                {isScheduleMode ? strings.schedule.title : strings.automation.title}
+              </h2>
               <p className={`text-[11px] ${
                 isScheduleMode
                   ? isLight ? 'text-amber-800' : 'text-amber-400'
