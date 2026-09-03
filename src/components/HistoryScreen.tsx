@@ -256,27 +256,6 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
               </p>
             </div>
           </div>
-
-          {logs.length > 0 && (
-            <button
-              id="btn-clear-all-history"
-              onClick={() => {
-                feedback.playClick();
-                if (confirm(strings.history.clearAllConfirm)) {
-                  onClearHistory();
-                }
-              }}
-              className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 border transition active:scale-95 ${
-                isLight
-                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                  : 'bg-rose-950/40 hover:bg-rose-950/70 text-rose-300 border-rose-800'
-              }`}
-              title={strings.history.clearBtn}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{strings.history.clearBtn}</span>
-            </button>
-          )}
         </div>
 
         {/* SEARCH BAR */}

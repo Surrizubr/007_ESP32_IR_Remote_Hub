@@ -94,8 +94,8 @@ export const ButtonAssignModal: React.FC<ButtonAssignModalProps> = ({
     { id: 'ac', label: strings.copy.quickCategoryAC },
     { id: 'sound', label: strings.copy.quickCategorySound },
     { id: 'lights', label: strings.copy.quickCategoryLights },
-    { id: 'smartbox', label: 'Smart Box' },
-    { id: 'projector', label: 'Projector' },
+    { id: 'smartbox', label: strings.remote.layoutSmartbox },
+    { id: 'projector', label: strings.remote.layoutProjector },
     { id: 'custom', label: strings.copy.quickCategoryCustom },
   ];
 
@@ -112,10 +112,10 @@ export const ButtonAssignModal: React.FC<ButtonAssignModalProps> = ({
         <div className={`flex items-center justify-between pb-3 border-b ${isLight ? 'border-sky-200' : 'border-slate-800'}`}>
           <div>
             <h3 className={`font-bold text-base ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              {language === 'pt' ? 'Configurar Botão' : language === 'es' ? 'Configurar Botón' : 'Configure Button'}
+              {strings.modals.configureButton}
             </h3>
             <p className={`text-xs font-mono mt-0.5 ${isLight ? 'text-sky-700 font-semibold' : 'text-blue-400'}`}>
-              {language === 'pt' ? 'Tecla:' : language === 'es' ? 'Tecla:' : 'Key:'} <span className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{buttonLabel}</span>
+              {strings.modals.keyLabel} <span className={`font-bold ${isLight ? 'text-slate-900' : 'text-white'}`}>{buttonLabel}</span>
             </p>
           </div>
           <button
@@ -138,9 +138,9 @@ export const ButtonAssignModal: React.FC<ButtonAssignModalProps> = ({
             ? 'bg-blue-50/90 border-blue-200 text-blue-900'
             : 'bg-blue-950/40 border-blue-800/40 text-blue-200'
         }`}>
-          <span>{language === 'pt' ? 'Selecione 1 ou mais comandos IR para este botão.' : language === 'es' ? 'Seleccione 1 o más comandos IR para este botón.' : 'Select 1 or more IR commands for this button.'}</span>
+          <span>{strings.modals.multiSelectHint}</span>
           <span className="font-bold font-mono">
-            {selectedIds.length === 0 ? strings.common.none : `${selectedIds.length} ${language === 'pt' ? 'selecionado(s)' : language === 'es' ? 'seleccionado(s)' : 'selected'}`}
+            {selectedIds.length === 0 ? strings.common.none : `${selectedIds.length} ${strings.common.selectedCount}`}
           </span>
         </div>
 
@@ -200,10 +200,10 @@ export const ButtonAssignModal: React.FC<ButtonAssignModalProps> = ({
           >
             <div>
               <div className={`text-xs font-semibold ${isLight ? 'text-slate-800' : 'text-slate-300'}`}>
-                {language === 'pt' ? 'Sem comando atribuído' : language === 'es' ? 'Sin comando asignado' : 'No command assigned'}
+                {strings.modals.unassignedOption}
               </div>
               <div className={`text-[10px] ${isLight ? 'text-slate-500' : 'text-slate-500'}`}>
-                {language === 'pt' ? 'O botão não disparará nenhum sinal IR' : language === 'es' ? 'El botón no emitirá ninguna señal IR' : 'Button will not send any IR signal'}
+                {strings.modals.unassignedOptionDesc}
               </div>
             </div>
             

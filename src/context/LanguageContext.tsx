@@ -1,7 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { AppLanguage, TranslationDictionary, translations } from '../data/translations';
+import {
+  AppLanguage,
+  TranslationDictionary,
+  LanguageMeta,
+  AVAILABLE_LANGUAGES,
+  translations,
+} from '../data/translations';
 
-export type { AppLanguage, TranslationDictionary };
+export type { AppLanguage, TranslationDictionary, LanguageMeta };
+export { AVAILABLE_LANGUAGES };
 
 interface LanguageContextType {
   language: AppLanguage;
@@ -28,8 +35,10 @@ const LanguageContext = createContext<LanguageContextType>(defaultContext);
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<AppLanguage>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === 'pt' || saved === 'en' || saved === 'es') return saved;
+      const saved = localStorage.getItem(STORAGE_KEY) as AppLanguage;
+      if (saved && AVAILABLE_LANGUAGES.some((l) => l.code === saved)) {
+        return saved;
+      }
       return 'pt';
     } catch {
       return 'pt';
@@ -42,8 +51,9 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch {
       // ignore
     }
-    // Update HTML lang attribute
-    document.documentElement.lang = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-ES';
+    const currentMeta = AVAILABLE_LANGUAGES.find((l) => l.code === language);
+    document.documentElement.lang = currentMeta?.locale || 'pt-BR';
+    document.documentElement.dir = currentMeta?.dir || 'ltr';
   }, [language]);
 
   const setLanguage = (newLang: AppLanguage) => {
@@ -55,16 +65,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [language]);
 
   const localeStr = useMemo(() => {
-    switch (language) {
-      case 'pt':
-        return 'pt-BR';
-      case 'en':
-        return 'en-US';
-      case 'es':
-        return 'es-ES';
-      default:
-        return 'pt-BR';
-    }
+    const currentMeta = AVAILABLE_LANGUAGES.find((l) => l.code === language);
+    return currentMeta?.locale || 'pt-BR';
   }, [language]);
 
   const t = (keyPath: string, params?: Record<string, string | number>): string => {

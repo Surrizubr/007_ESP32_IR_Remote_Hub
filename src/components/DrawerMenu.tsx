@@ -32,7 +32,7 @@ import { ScreenTab, ESP32DeviceState, ESP32PinConfig } from '../types';
 import { esp32 } from '../services/esp32Service';
 import { feedback } from '../services/soundService';
 import { useTheme } from '../context/ThemeContext';
-import { useLanguage, AppLanguage } from '../context/LanguageContext';
+import { useLanguage, AppLanguage, AVAILABLE_LANGUAGES } from '../context/LanguageContext';
 import { DeviceSyncScreen } from './DeviceSyncScreen';
 
 export type SubDrawerType = 'themes' | 'tools' | 'feedback' | 'languages' | 'sync' | null;
@@ -137,14 +137,8 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
   if (!isOpen) return null;
 
   const getLanguageLabel = (lang: AppLanguage) => {
-    switch (lang) {
-      case 'pt':
-        return 'Português (BR)';
-      case 'en':
-        return 'English (US)';
-      case 'es':
-        return 'Español (ES)';
-    }
+    const found = AVAILABLE_LANGUAGES.find((l) => l.code === lang);
+    return found ? `${found.flag} ${found.nativeName}` : lang;
   };
 
   return (
@@ -1091,108 +1085,45 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
               </button>
             </div>
 
-            <div className="p-4 space-y-2.5 overflow-y-auto">
-              {/* Option: Português */}
-              <button
-                id="lang-option-pt"
-                onClick={() => handleSelectLanguage('pt')}
-                className={`w-full p-3.5 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                  language === 'pt'
-                    ? isLight
-                      ? 'bg-sky-100/90 border-sky-400 text-sky-950 ring-2 ring-sky-400/30 shadow-md font-bold'
-                      : 'bg-slate-800 border-blue-500 text-white ring-2 ring-blue-500/30 shadow-md font-bold'
-                    : isLight
-                    ? 'bg-white/90 border-sky-200 text-slate-700 hover:bg-sky-50'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🇧🇷</span>
-                  <div>
-                    <div className="text-xs font-bold">{strings.drawer.langPtTitle}</div>
-                    <div className={`text-[11px] font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {strings.drawer.langPtDesc}
-                    </div>
-                  </div>
-                </div>
-                {language === 'pt' && (
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs text-white ${
-                      isLight ? 'bg-sky-600' : 'bg-blue-500'
+            <div className="p-4 space-y-2 overflow-y-auto max-h-[calc(100vh-140px)]">
+              {AVAILABLE_LANGUAGES.map((langItem) => {
+                const isSelected = language === langItem.code;
+                return (
+                  <button
+                    key={langItem.code}
+                    id={`lang-option-${langItem.code}`}
+                    onClick={() => handleSelectLanguage(langItem.code)}
+                    className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${
+                      isSelected
+                        ? isLight
+                          ? 'bg-sky-100/90 border-sky-400 text-sky-950 ring-2 ring-sky-400/30 shadow-md font-bold'
+                          : 'bg-slate-800 border-blue-500 text-white ring-2 ring-blue-500/30 shadow-md font-bold'
+                        : isLight
+                        ? 'bg-white/90 border-sky-200 text-slate-700 hover:bg-sky-50'
+                        : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
                     }`}
                   >
-                    ✓
-                  </span>
-                )}
-              </button>
-
-              {/* Option: Inglês */}
-              <button
-                id="lang-option-en"
-                onClick={() => handleSelectLanguage('en')}
-                className={`w-full p-3.5 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                  language === 'en'
-                    ? isLight
-                      ? 'bg-sky-100/90 border-sky-400 text-sky-950 ring-2 ring-sky-400/30 shadow-md font-bold'
-                      : 'bg-slate-800 border-blue-500 text-white ring-2 ring-blue-500/30 shadow-md font-bold'
-                    : isLight
-                    ? 'bg-white/90 border-sky-200 text-slate-700 hover:bg-sky-50'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🇺🇸</span>
-                  <div>
-                    <div className="text-xs font-bold">{strings.drawer.langEnTitle}</div>
-                    <div className={`text-[11px] font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {strings.drawer.langEnDesc}
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl shrink-0">{langItem.flag}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold truncate">{langItem.nativeName}</div>
+                        <div className={`text-[11px] font-normal truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                          {langItem.name}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
-                {language === 'en' && (
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs text-white ${
-                      isLight ? 'bg-sky-600' : 'bg-blue-500'
-                    }`}
-                  >
-                    ✓
-                  </span>
-                )}
-              </button>
-
-              {/* Option: Espanhol */}
-              <button
-                id="lang-option-es"
-                onClick={() => handleSelectLanguage('es')}
-                className={`w-full p-3.5 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                  language === 'es'
-                    ? isLight
-                      ? 'bg-sky-100/90 border-sky-400 text-sky-950 ring-2 ring-sky-400/30 shadow-md font-bold'
-                      : 'bg-slate-800 border-blue-500 text-white ring-2 ring-blue-500/30 shadow-md font-bold'
-                    : isLight
-                    ? 'bg-white/90 border-sky-200 text-slate-700 hover:bg-sky-50'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🇪🇸</span>
-                  <div>
-                    <div className="text-xs font-bold">{strings.drawer.langEsTitle}</div>
-                    <div className={`text-[11px] font-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {strings.drawer.langEsDesc}
-                    </div>
-                  </div>
-                </div>
-                {language === 'es' && (
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-xs text-white ${
-                      isLight ? 'bg-sky-600' : 'bg-blue-500'
-                    }`}
-                  >
-                    ✓
-                  </span>
-                )}
-              </button>
+                    {isSelected && (
+                      <span
+                        className={`w-5 h-5 shrink-0 rounded-full flex items-center justify-center text-xs text-white ${
+                          isLight ? 'bg-sky-600' : 'bg-blue-500'
+                        }`}
+                      >
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
 
               <div
                 className={`p-3.5 rounded-2xl border text-xs leading-relaxed mt-4 ${
