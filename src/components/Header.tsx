@@ -135,7 +135,7 @@ export const Header: React.FC<HeaderProps> = ({
               : 'bg-slate-800 hover:bg-slate-700 text-sky-400 border-slate-700 shadow-sm'
           }`}
         >
-          <RefreshCw className="w-4 h-4" />
+          <Wifi className="w-4 h-4" />
         </button>
 
         {/* Quick Theme Switcher Button */}

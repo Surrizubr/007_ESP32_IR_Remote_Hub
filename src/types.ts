@@ -179,6 +179,13 @@ export interface ESP32PinConfig {
   pwmFrequency: number; // usually 38000 Hz
 }
 
+export interface ServiceLog {
+  id: string;
+  type: 'info' | 'error' | 'success' | 'tx' | 'rx';
+  message: string;
+  timestamp: string;
+}
+
 export interface ESP32DeviceState {
   connected: boolean;
   connectionType: 'ble' | 'wifi' | 'both' | 'offline';
@@ -196,6 +203,7 @@ export interface ESP32DeviceState {
   uptimeSeconds: number;
   freeHeap: number; // bytes
   isSyncing?: boolean;
+  logs: ServiceLog[];
   pinConfig: ESP32PinConfig;
   lastReceivedCommand?: {
     protocol: IRProtocol;

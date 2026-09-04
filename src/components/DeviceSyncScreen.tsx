@@ -44,8 +44,8 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   const [bleStatusMsg, setBleStatusMsg] = useState<{ text: string; isError?: boolean } | null>(null);
 
   // WiFi provisioning state
-  const [ssid, setSsid] = useState<string>(espState.wifiSsid || 'MinhaRede_WiFi');
-  const [password, setPassword] = useState<string>('');
+  const [ssid, setSsid] = useState<string>(espState.wifiSsid || '');
+  const [password, setPassword] = useState<string>(espState.wifiPassword || '');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isSendingWifi, setIsSendingWifi] = useState<boolean>(false);
   const [wifiSuccessMsg, setWifiSuccessMsg] = useState<string | null>(null);
@@ -60,7 +60,19 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   const [pingResult, setPingResult] = useState<number | null>(null);
   const [pingMessage, setPingMessage] = useState<string | null>(null);
   const [isEditingIp, setIsEditingIp] = useState<boolean>(false);
-  const [customIp, setCustomIp] = useState<string>(espState.ipAddress || '192.168.1.105');
+  const [customIp, setCustomIp] = useState<string>(espState.ipAddress || '');
+
+  // Update fields when espState changes (e.g. IP discovered via BLE)
+  useEffect(() => {
+    if (espState.ipAddress && espState.ipAddress !== customIp) {
+      setCustomIp(espState.ipAddress);
+    }
+  }, [espState.ipAddress]);
+
+  useEffect(() => {
+    if (espState.wifiSsid && !ssid) setSsid(espState.wifiSsid);
+    if (espState.wifiPassword && !password) setPassword(espState.wifiPassword);
+  }, [espState.wifiSsid, espState.wifiPassword]);
 
   // IR Hardware live test state
   const [isTestingIrTx, setIsTestingIrTx] = useState<boolean>(false);
@@ -215,7 +227,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                   {espState.connected ? strings.sync.connectedOnline : strings.sync.disconnected}
                 </div>
               </div>
-              <p className={`text-[11px] font-bold mt-0.5 opacity-40 font-mono tracking-widest`}>FIRMWARE V4.8 PRO</p>
+              <p className={`text-[11px] font-bold mt-0.5 opacity-40 font-mono tracking-widest`}>FIRMWARE V4.8.5 PRO</p>
             </div>
           </div>
           <button
@@ -234,7 +246,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               <Wifi className="w-3.5 h-3.5 text-black" /> Sinal WiFi
             </div>
             <div className="flex items-baseline gap-1">
-              <span className="text-6xl font-black font-mono text-black">{espState.wifiRssi || espState.rssi || 0}</span>
+              <span className="text-4xl font-black font-mono text-black">{espState.wifiRssi || espState.rssi || 0}</span>
               <span className="text-[10px] font-bold text-black/60">dBm</span>
             </div>
           </div>
@@ -245,7 +257,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               <Bluetooth className="w-3.5 h-3.5 text-black" /> Sinal BLE
             </div>
             <div className="flex items-baseline gap-1">
-              <span className="text-6xl font-black font-mono text-black">{espState.bleConnected ? -45 : 0}</span>
+              <span className="text-4xl font-black font-mono text-black">{espState.bleConnected ? -45 : 0}</span>
               <span className="text-[10px] font-bold text-black/60">dBm</span>
             </div>
           </div>
@@ -253,10 +265,10 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           {/* Box 3: IP & MAC WiFi */}
           <div className="p-4 rounded-2xl border bg-white border-slate-400 shadow-sm">
             <div className="text-[10px] font-black text-black mb-2 uppercase tracking-widest">IP & MAC WiFi</div>
-            <div className="text-2xl font-black font-mono text-black truncate">
+            <div className="text-sm font-black font-mono text-black truncate">
               {espState.ipAddress || 'OFFLINE'}
             </div>
-            <div className="text-[9px] font-black font-mono text-black/60 mt-1">
+            <div className="text-[8px] font-black font-mono text-black/60 mt-1">
               {espState.wifiMac || '00:00:00:00:00:00'}
             </div>
           </div>
@@ -264,10 +276,10 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           {/* Box 4: MAC BLE */}
           <div className="p-4 rounded-2xl border bg-white border-slate-400 shadow-sm">
             <div className="text-[10px] font-black text-black mb-2 uppercase tracking-widest">MAC BLE</div>
-            <div className="text-2xl font-black font-mono text-black truncate">
+            <div className="text-sm font-black font-mono text-black truncate">
               {espState.bleMac || '00:00:00:00:00:00'}
             </div>
-            <div className="text-[9px] font-black font-mono text-black/60 mt-1">
+            <div className="text-[8px] font-black font-mono text-black/60 mt-1">
                {espState.bleDeviceName || 'ESP32_HUB'}
             </div>
           </div>
@@ -312,14 +324,17 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
         <button
           onClick={handleScanBLE}
           disabled={isScanningBle}
-          className="w-fit mx-auto px-6 py-2 font-black rounded-xl text-[10px] flex items-center justify-center gap-2 active:scale-[0.98] transition-all bg-sky-300 text-black shadow-md uppercase tracking-widest mb-4"
+          className="w-full py-4 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all bg-sky-500 text-white uppercase tracking-widest mb-4"
         >
           <Bluetooth className={`w-3.5 h-3.5 ${isScanningBle ? 'animate-spin' : ''}`} />
-          <span>{isScanningBle ? strings.sync.bleScanning : strings.sync.scanBleBtn}</span>
+          <span>{isScanningBle ? strings.sync.bleScanning : "Conectar no Bluetooth"}</span>
         </button>
 
         {espState.bleConnected && (
-          <button onClick={handleDisconnectBLE} className="w-full mt-3 py-3 text-[10px] font-black rounded-xl border border-rose-500/30 text-rose-500 bg-rose-500/5 uppercase tracking-widest">
+          <button
+            onClick={handleDisconnectBLE}
+            className="w-full py-4 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all border border-rose-500/30 text-rose-500 bg-rose-500/5 uppercase tracking-widest"
+          >
             {strings.sync.bleDisconnectBtn}
           </button>
         )}
@@ -378,7 +393,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
             disabled={isSendingWifi}
             className={`w-full py-4 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all bg-gradient-to-r from-emerald-600 to-teal-700 text-white uppercase tracking-widest`}
           >
-            {isSendingWifi ? 'Enviando Dados...' : 'Gravar Credenciais no Hub'}
+            {isSendingWifi ? 'Enviando Dados...' : 'Conectar no WIFI'}
           </button>
         </div>
       </div>
@@ -418,7 +433,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               onClick={handleTestPing}
               disabled={isPinging}
               className={`px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${
-                isPinging ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white shadow-md'
+                isPinging ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-md'
               }`}
             >
               {isPinging ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Ping'}
@@ -472,7 +487,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                   : 'bg-emerald-600 text-white shadow-emerald-900/20'
               }`}
             >
-              {isListeningRx ? 'Desativar' : 'Ativar'}
+              {isListeningRx ? 'Desativar' : 'Escutar'}
             </button>
           </div>
 
@@ -491,6 +506,39 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                 {isListeningRx ? 'Aguardando capturar sinal...' : 'Inicie o monitoramento'}
               </p>
             </div>
+          )}
+        </div>
+      </div>
+
+      {/* LOG CONSOLE */}
+      <div className={`rounded-[32px] p-6 shadow-xl border transition-all bg-white border-slate-100`}>
+        <div className="flex items-center gap-4 mb-6">
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border bg-sky-50 text-sky-600 border-sky-100`}>
+            <Activity className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="font-black text-base tracking-tight text-slate-900">Console de Comandos</h3>
+            <p className="text-[11px] font-medium opacity-50">Log de atividades em tempo real</p>
+          </div>
+        </div>
+        <div className="space-y-2 max-h-48 overflow-y-auto pr-2 scrollbar-hide font-mono text-[10px]">
+          {espState.logs && espState.logs.length > 0 ? (
+            espState.logs.map((log) => (
+              <div key={log.id} className="flex gap-3 border-b border-slate-100 pb-2 last:border-0">
+                <span className="text-slate-400 shrink-0">{log.timestamp}</span>
+                <span className={`font-black uppercase shrink-0 ${
+                  log.type === 'tx' ? 'text-amber-500' :
+                  log.type === 'rx' ? 'text-emerald-500' :
+                  log.type === 'error' ? 'text-rose-500' :
+                  log.type === 'success' ? 'text-sky-400' : 'text-slate-600'
+                }`}>
+                  [{log.type}]
+                </span>
+                <span className="text-slate-700 break-all">{log.message}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-slate-300 italic text-center py-4 uppercase tracking-widest font-black">Aguardando atividades...</div>
           )}
         </div>
       </div>

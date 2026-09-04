@@ -34,6 +34,7 @@ class ESP32Service {
     rssi: 0,
     uptimeSeconds: 0,
     freeHeap: 0,
+    logs: [],
     pinConfig: {
       irReceiverPin: 15,
       irTransmitterPin: 4,
@@ -69,6 +70,10 @@ class ESP32Service {
       if (savedSsid) {
         this.state.wifiSsid = savedSsid;
       }
+      const savedPass = localStorage.getItem('esp32_last_pass');
+      if (savedPass) {
+        this.state.wifiPassword = savedPass;
+      }
     } catch (e) {
       console.warn('Error loading persisted ESP32 state', e);
     }
@@ -81,6 +86,9 @@ class ESP32Service {
       }
       if (this.state.wifiSsid) {
         localStorage.setItem('esp32_last_ssid', this.state.wifiSsid);
+      }
+      if (this.state.wifiPassword) {
+        localStorage.setItem('esp32_last_pass', this.state.wifiPassword);
       }
     } catch (e) {}
   }
@@ -99,6 +107,17 @@ class ESP32Service {
     return () => {
       this.listeners = this.listeners.filter(l => l !== callback);
     };
+  }
+
+  public addLog(type: 'info' | 'error' | 'success' | 'tx' | 'rx', message: string) {
+    const newLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      type,
+      message,
+      timestamp: new Date().toLocaleTimeString('pt-BR'),
+    };
+    this.state.logs = [newLog, ...this.state.logs].slice(0, 50);
+    this.notify();
   }
 
   private notify() {
@@ -209,8 +228,10 @@ class ESP32Service {
   public async connectById(id: string): Promise<{ success: boolean; message: string }> {
     await this.ensureBleInitialized();
     try {
+      this.addLog('info', `Tentando conectar via BLE: ${id}...`);
       await BleClient.connect(id, () => {
         this.state.bleConnected = false;
+        this.addLog('error', 'Bluetooth desconectado!');
         this.notify();
       });
       this.deviceId = id;
@@ -221,9 +242,11 @@ class ESP32Service {
       this.state.bleConnected = true;
       this.state.bleDeviceName = "ESP32_IR_HUB";
       this.isSimulated = false;
+      this.addLog('success', 'BLE Conectado com sucesso!');
       this.notify();
       return { success: true, message: "Conectado com sucesso!" };
     } catch (e: any) {
+      this.addLog('error', `Falha na conexão BLE: ${e.message}`);
       return { success: false, message: e.message };
     }
   }
@@ -447,8 +470,12 @@ class ESP32Service {
           if (parsed.wifi_mac) this.state.wifiMac = parsed.wifi_mac;
           if (parsed.ble_mac) this.state.bleMac = parsed.ble_mac;
           this.state.wifiConnected = true;
+          this.addLog('success', `IP Recebido via BLE: ${parsed.ip}`);
           this.persistState();
           this.notify();
+
+          // Tenta validar a conexão HTTP imediatamente
+          this.testWiFiConnection(parsed.ip);
         }
         if (this.wifiConnectResolver) {
           this.wifiConnectResolver({
@@ -539,6 +566,8 @@ class ESP32Service {
   public async sendWiFiCredentials(ssid: string, pass: string): Promise<{ success: boolean; ip?: string; message: string }> {
     this.state.wifiSsid = ssid;
     this.state.wifiPassword = pass;
+    this.persistState();
+    this.addLog('info', `Enviando Wi-Fi: ${ssid}...`);
 
     const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
 
@@ -546,8 +575,10 @@ class ESP32Service {
     if (this.state.connectionType === 'ble' && (this.deviceId || this.webServer)) {
       try {
         await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.WIFI_CHAR, payload);
+        this.addLog('success', 'Credenciais enviadas via BLE!');
         return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
       } catch (e: any) {
+        this.addLog('error', `Falha BLE Wi-Fi: ${e.message}`);
         console.error('BLE WiFi error', e);
         return { success: false, message: `Erro ao enviar via BLE: ${e?.message || 'Falha'}` };
       }
@@ -572,11 +603,12 @@ class ESP32Service {
           }
           this.state.connectionType = 'wifi';
           this.state.connected = true;
+          this.addLog('success', `Wi-Fi configurado via HTTP (${ip})`);
           this.notify();
           return {
             success: true,
             ip: this.state.ipAddress,
-            message: `Credenciais gravadas via HTTP (${ip})! ESP32 associado à rede "${ssid}".`,
+            message: data.message || `Credenciais gravadas via HTTP (${ip})! ESP32 associado à rede "${ssid}".`,
           };
         }
       } catch (httpErr) {
@@ -584,6 +616,7 @@ class ESP32Service {
       }
     }
 
+    this.addLog('error', 'Hub não alcançável para config Wi-Fi');
     return {
       success: false,
       message: 'ESP32 não conectado. Conecte ao ESP32 via Bluetooth (BLE) ou conecte-se ao Wi-Fi do ESP32 "ESP32_IR_HUB_AP" (192.168.4.1).',
@@ -738,6 +771,7 @@ class ESP32Service {
   // Send an IR Command via the ESP32 transmitter
   public async transmitIR(command: IRCommand): Promise<{ success: boolean; durationMs: number }> {
     const startTime = Date.now();
+    this.addLog('tx', `Enviando ${command.protocol}: ${command.hexCode}...`);
     const payload = JSON.stringify({
       protocol: command.protocol,
       hex: command.hexCode,
@@ -789,7 +823,10 @@ class ESP32Service {
         hexCode: command.hexCode,
         timestamp: new Date().toLocaleTimeString('pt-BR'),
       };
+      this.addLog('success', `IR Transmitido (${Date.now() - startTime}ms)`);
       this.notify();
+    } else {
+      this.addLog('error', 'Falha ao transmitir IR');
     }
 
     return {
@@ -873,6 +910,7 @@ class ESP32Service {
 
   // Trigger an incoming IR signal (used by physical ESP32 or sniffer simulator)
   public simulateIncomingIR(protocol: string, hexCode: string, bits: number, rawTimings?: number[]) {
+    this.addLog('rx', `Sinal Capturado: ${protocol} ${hexCode}`);
     const sampleTimings = rawTimings || [9000, 4500, 560, 1690, 560, 560, 560, 1690, 560, 560, 560, 1690, 560, 560];
     const data = {
       protocol,
@@ -958,7 +996,7 @@ export const esp32 = new ESP32Service();
 export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
   return `/*
  * ==========================================================
- * ESP32 IR Controller & Smart Remote Gateway Firmware v4.8.1
+ * ESP32 IR Controller & Smart Remote Gateway Firmware v4.8.5
  * Totalmente compatível com o App Web / Mobile (WiFi + BLE)
  * ==========================================================
  */
@@ -1008,6 +1046,8 @@ bool deviceConnected = false;
 
 // Controle de Estado
 unsigned long lastBlink = 0;
+unsigned long lastWifiCheck = 0;
+wl_status_t lastWifiStatus = WL_IDLE_STATUS;
 String pendingSsid = "";
 String pendingPass = "";
 bool shouldConnectWifi = false;
@@ -1064,7 +1104,7 @@ void broadcastIR(String p, uint64_t h, int b, uint16_t* raw = NULL, uint16_t len
   else irsend.sendNEC(h, b);
 
   if (deviceConnected) {
-    pRxChar->setValue("{\\\"status\\\":\\\"sent\\\"}");
+    pRxChar->setValue("{\\\"success\\\":true,\\\"message\\\":\\\"IR Transmitido\\\"}");
     pRxChar->notify();
   }
 }
@@ -1081,7 +1121,7 @@ void handleStatus() {
   String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
   String macW = WiFi.macAddress();
   String macB = BLEDevice::getAddress().toString().c_str();
-  String json = "{\\\"status\\\":\\\"online\\\",\\\"ip\\\":\\\""+ip+"\\\",\\\"uptime\\\":"+String(millis()/1000)+",\\\"freeHeap\\\":"+String(ESP.getFreeHeap())+",\\\"wifi_mac\\\":\\\""+macW+"\\\",\\\"ble_mac\\\":\\\""+macB+"\\\",\\\"rssi\\\":"+String(WiFi.RSSI())+"}";
+  String json = "{\\\"success\\\":true,\\\"status\\\":\\\"online\\\",\\\"ip\\\":\\\""+ip+"\\\",\\\"uptime\\\":"+String(millis()/1000)+",\\\"freeHeap\\\":"+String(ESP.getFreeHeap())+",\\\"wifi_mac\\\":\\\""+macW+"\\\",\\\"ble_mac\\\":\\\""+macB+"\\\",\\\"rssi\\\":"+String(WiFi.RSSI())+"}";
   server.send(200, "application/json", json);
 }
 
@@ -1102,7 +1142,7 @@ void handlePins() {
     irsend.begin();
 
     ledFeedback(3, 100);
-    server.send(200, "application/json", "{\\\"success\\\":true}");
+    server.send(200, "application/json", "{\\\"success\\\":true,\\\"message\\\":\\\"Hardware atualizado\\\"}");
   }
 }
 
@@ -1125,7 +1165,7 @@ void handleWifiConfig() {
     pendingSsid = getJsonVal(body, "ssid");
     pendingPass = getJsonVal(body, "password");
     shouldConnectWifi = true;
-    server.send(200, "application/json", "{\\\"success\\\":true,\\\"message\\\":\\\"Credenciais recebidas, conectando...\\\"}");
+    server.send(200, "application/json", "{\\\"success\\\":true,\\\"message\\\":\\\"Conectando ao WiFi...\\\"}");
   } else {
     server.send(400, "application/json", "{\\\"success\\\":false,\\\"message\\\":\\\"Dados ausentes\\\"}");
   }
@@ -1134,7 +1174,7 @@ void handleWifiConfig() {
 void handleReceive() {
   sendCORS();
   if (lastCaptured.hasNew) {
-    String json = "{\\\"hasNew\\\":true,\\\"protocol\\\":\\\""+lastCaptured.protocol+"\\\",\\\"hex\\\":\\\""+lastCaptured.hexCode+"\\\",\\\"bits\\\":"+String(lastCaptured.bits)+",\\\"rawTimings\\\":[";
+    String json = "{\\\"success\\\":true,\\\"hasNew\\\":true,\\\"protocol\\\":\\\""+lastCaptured.protocol+"\\\",\\\"hex\\\":\\\""+lastCaptured.hexCode+"\\\",\\\"bits\\\":"+String(lastCaptured.bits)+",\\\"rawTimings\\\":[";
     for(int i=0; i<lastCaptured.rawLen; i++) {
       json += String(lastCaptured.rawData[i]);
       if(i<lastCaptured.rawLen-1) json += ",";
@@ -1143,7 +1183,7 @@ void handleReceive() {
     server.send(200, "application/json", json);
     lastCaptured.hasNew = false;
   } else {
-    server.send(200, "application/json", "{\\\"hasNew\\\":false}");
+    server.send(200, "application/json", "{\\\"success\\\":true,\\\"hasNew\\\":false}");
   }
 }
 
@@ -1179,6 +1219,8 @@ void setup() {
   irrecv.enableIRIn();
   irsend.begin();
 
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("ESP32_IR_HUB_AP", "12345678");
 
@@ -1190,7 +1232,7 @@ void setup() {
     sendCORS();
     String body = server.arg("plain");
     broadcastIR(getJsonVal(body, "protocol"), strtoull(getJsonVal(body, "hex").c_str(), NULL, 16), getJsonVal(body, "bits").toInt());
-    server.send(200, "application/json", "{\\\"status\\\":\\\"ok\\\"}");
+    server.send(200, "application/json", "{\\\"success\\\":true,\\\"message\\\":\\\"IR Enviado com sucesso\\\"}");
   });
   server.onNotFound([](){ if(server.method()==HTTP_OPTIONS){ sendCORS(); server.send(204); } });
   server.begin();
@@ -1217,6 +1259,23 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  // Monitorar mudança de status WiFi para notificar o App via BLE
+  if (millis() - lastWifiCheck > 3000) {
+    lastWifiCheck = millis();
+    wl_status_t currentStatus = WiFi.status();
+    if (currentStatus != lastWifiStatus) {
+      lastWifiStatus = currentStatus;
+      if (currentStatus == WL_CONNECTED && deviceConnected) {
+        String ip = WiFi.localIP().toString();
+        String mac = WiFi.macAddress();
+        String msg = "{\\\"success\\\":true,\\\"type\\\":\\\"wifi_status\\\",\\\"status\\\":\\\"connected\\\",\\\"ip\\\":\\\""+ip+"\\\",\\\"wifi_mac\\\":\\\""+mac+"\\\"}";
+        pWifiChar->setValue(msg.c_str());
+        pWifiChar->notify();
+        ledFeedback(2, 100);
+      }
+    }
+  }
 
   if (shouldScanWifi) {
     shouldScanWifi = false;
@@ -1252,7 +1311,7 @@ void loop() {
     lastCaptured.hasNew = true;
 
     if (deviceConnected) {
-      String ble = "{\\\"protocol\\\":\\\""+p+"\\\",\\\"hex\\\":\\\""+String(h)+"\\\",\\\"bits\\\":"+String(results.bits)+"}";
+      String ble = "{\\\"success\\\":true,\\\"type\\\":\\\"rx\\\",\\\"protocol\\\":\\\""+p+"\\\",\\\"hex\\\":\\\""+String(h)+"\\\",\\\"bits\\\":"+String(results.bits)+"}";
       pRxChar->setValue(ble.c_str());
       pRxChar->notify();
     }
@@ -1271,3 +1330,4 @@ void loop() {
 }
 `;
 }
+
