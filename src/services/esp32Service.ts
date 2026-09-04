@@ -146,7 +146,13 @@ class ESP32Service {
 
   private startUptimeTicker() {
     setInterval(async () => {
-      // Periodic WiFi Health Check
+      // Se estiver desconectado, tenta uma atualização completa de conexão (Auto-Discovery)
+      if (!this.state.wifiConnected && !this.state.bleConnected) {
+        await this.refreshConnection();
+        return;
+      }
+
+      // Se já tem um IP conhecido, faz o check de saúde periódico
       if (this.state.ipAddress) {
         try {
           const res = await fetch(`http://${this.state.ipAddress}/api/status`, {
@@ -169,27 +175,11 @@ class ESP32Service {
           }
         } catch (e) {
           this.state.wifiConnected = false;
+          // Se falhou o IP conhecido, tenta o mDNS na próxima iteração
         }
-      } else {
-        this.state.wifiConnected = false;
       }
-
-      if (this.state.connected) {
-        if (this.state.connectionType !== 'wifi' && this.state.connectionType !== 'both') {
-          // Increment simulated uptime if not getting real data from WiFi
-          this.state.uptimeSeconds += 2;
-          // Small realistic jitter on RSSI if simulated
-          if (this.isSimulated && Math.random() > 0.7) {
-            const jitter = (Math.random() - 0.5) * 4;
-            this.state.rssi = Math.min(-30, Math.max(-90, Math.round(this.state.rssi + jitter)));
-          }
-        }
-        this.notify();
-      } else if (this.state.wifiConnected) {
-        // We found a WiFi connection while "disconnected"
-        this.notify();
-      }
-    }, 2000);
+      this.notify();
+    }, 4000); // Polling a cada 4 segundos
   }
 
   // Check if BLE is supported (Web or Native)
@@ -564,169 +554,187 @@ class ESP32Service {
 
   // Configure WiFi credentials onto the ESP32
   public async sendWiFiCredentials(ssid: string, pass: string): Promise<{ success: boolean; ip?: string; message: string }> {
-    this.state.wifiSsid = ssid;
-    this.state.wifiPassword = pass;
-    this.persistState();
-    this.addLog('info', `Enviando Wi-Fi: ${ssid}...`);
+    if (this.state.isSyncing) return { success: false, message: 'Processando...' };
+    this.state.isSyncing = true;
+    this.notify();
 
-    const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
+    try {
+      this.state.wifiSsid = ssid;
+      this.state.wifiPassword = pass;
+      this.persistState();
+      this.addLog('info', `Enviando Wi-Fi: ${ssid}...`);
 
-    // 1. BLE send (Native or Web)
-    if (this.state.connectionType === 'ble' && (this.deviceId || this.webServer)) {
-      try {
-        await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.WIFI_CHAR, payload);
-        this.addLog('success', 'Credenciais enviadas via BLE!');
-        return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
-      } catch (e: any) {
-        this.addLog('error', `Falha BLE Wi-Fi: ${e.message}`);
-        console.error('BLE WiFi error', e);
-        return { success: false, message: `Erro ao enviar via BLE: ${e?.message || 'Falha'}` };
-      }
-    }
+      const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
 
-    // 2. HTTP config to real ESP32 (SoftAP 192.168.4.1 or custom IP)
-    const targetIps = [this.state.ipAddress, '192.168.4.1'].filter(Boolean) as string[];
-    for (const ip of targetIps) {
-      try {
-        const formData = new URLSearchParams();
-        formData.append('plain', JSON.stringify({ ssid, password: pass }));
-
-        const res = await fetch(`http://${ip}/api/wifi/config`, {
-          method: 'POST',
-          body: formData,
-          signal: AbortSignal.timeout(4000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ip) {
-            this.state.ipAddress = data.ip;
-          }
-          this.state.connectionType = 'wifi';
-          this.state.connected = true;
-          this.addLog('success', `Wi-Fi configurado via HTTP (${ip})`);
-          this.notify();
-          return {
-            success: true,
-            ip: this.state.ipAddress,
-            message: data.message || `Credenciais gravadas via HTTP (${ip})! ESP32 associado à rede "${ssid}".`,
-          };
+      // 1. BLE send (Native or Web)
+      if (this.state.connectionType === 'ble' && (this.deviceId || this.webServer)) {
+        try {
+          await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.WIFI_CHAR, payload);
+          this.addLog('success', 'Credenciais enviadas via BLE!');
+          return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
+        } catch (e: any) {
+          this.addLog('error', `Falha BLE Wi-Fi: ${e.message}`);
+          console.error('BLE WiFi error', e);
+          return { success: false, message: `Erro ao enviar via BLE: ${e?.message || 'Falha'}` };
         }
-      } catch (httpErr) {
-        // Continue
       }
-    }
 
-    this.addLog('error', 'Hub não alcançável para config Wi-Fi');
-    return {
-      success: false,
-      message: 'ESP32 não conectado. Conecte ao ESP32 via Bluetooth (BLE) ou conecte-se ao Wi-Fi do ESP32 "ESP32_IR_HUB_AP" (192.168.4.1).',
-    };
+      // 2. HTTP config to real ESP32 (SoftAP 192.168.4.1 or custom IP)
+      const targetIps = [this.state.ipAddress, '192.168.4.1'].filter(Boolean) as string[];
+      for (const ip of targetIps) {
+        try {
+          const formData = new URLSearchParams();
+          formData.append('plain', JSON.stringify({ ssid, password: pass }));
+
+          const res = await fetch(`http://${ip}/api/wifi/config`, {
+            method: 'POST',
+            body: formData,
+            signal: AbortSignal.timeout(4000),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.ip) {
+              this.state.ipAddress = data.ip;
+            }
+            this.state.connectionType = 'wifi';
+            this.state.connected = true;
+            this.addLog('success', `Wi-Fi configurado via HTTP (${ip})`);
+            this.notify();
+            return {
+              success: true,
+              ip: this.state.ipAddress,
+              message: data.message || `Credenciais gravadas via HTTP (${ip})! ESP32 associado à rede "${ssid}".`,
+            };
+          }
+        } catch (httpErr) {
+          // Continue
+        }
+      }
+
+      this.addLog('error', 'Hub não alcançável para config Wi-Fi');
+      return {
+        success: false,
+        message: 'ESP32 não conectado. Conecte ao ESP32 via Bluetooth (BLE) ou conecte-se ao Wi-Fi do ESP32 "ESP32_IR_HUB_AP" (192.168.4.1).',
+      };
+    } finally {
+      this.state.isSyncing = false;
+      this.notify();
+    }
   }
 
   // Scan available real residential WiFis
   public async scanWiFiNetworks(targetIp?: string): Promise<WiFiNetwork[]> {
-    await this.ensureBleInitialized();
-    this.streamedNetworks = [];
+    if (this.state.isSyncing) return [];
+    this.state.isSyncing = true;
+    this.notify();
 
-    // 1. If running on native Android (Capacitor), scan real Wi-Fi networks via Android device WifiManager
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const { registerPlugin } = await import('@capacitor/core');
-        const WifiScanner = registerPlugin<any>('WifiScanner');
-        if (WifiScanner && typeof WifiScanner.scanNetworks === 'function') {
-          const res = await WifiScanner.scanNetworks();
-          if (res && Array.isArray(res.networks) && res.networks.length > 0) {
-            const sortedNets: WiFiNetwork[] = res.networks.sort((a: WiFiNetwork, b: WiFiNetwork) => b.rssi - a.rssi);
-            this.lastScanSource = 'android';
-            this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas via Wi-Fi do aparelho!`;
-            return sortedNets;
-          }
-        }
-      } catch (nativeErr) {
-        console.warn('Native Android Wi-Fi scan not available or permission denied:', nativeErr);
-      }
-    }
+    try {
+      await this.ensureBleInitialized();
+      this.streamedNetworks = [];
 
-    // 2. BLE Scan request (Native Capacitor BLE or Web Bluetooth connected to ESP32)
-    if (this.state.connected && this.state.connectionType === 'ble') {
-      try {
-        const scanPromise = new Promise<WiFiNetwork[]>((resolve) => {
-          this.wifiScanResolver = resolve;
-          setTimeout(() => {
-            if (this.wifiScanResolver === resolve) {
-              this.wifiScanResolver = null;
-              resolve(this.streamedNetworks);
+      // 1. If running on native Android (Capacitor), scan real Wi-Fi networks via Android device WifiManager
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { registerPlugin } = await import('@capacitor/core');
+          const WifiScanner = registerPlugin<any>('WifiScanner');
+          if (WifiScanner && typeof WifiScanner.scanNetworks === 'function') {
+            const res = await WifiScanner.scanNetworks();
+            if (res && Array.isArray(res.networks) && res.networks.length > 0) {
+              const sortedNets: WiFiNetwork[] = res.networks.sort((a: WiFiNetwork, b: WiFiNetwork) => b.rssi - a.rssi);
+              this.lastScanSource = 'android';
+              this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas via Wi-Fi do aparelho!`;
+              return sortedNets;
             }
-          }, 8000); // 8s timeout because hardware Wi-Fi scans take 2-4 seconds
-        });
-
-        const payload = JSON.stringify({ action: 'scan' });
-
-        if (Capacitor.isNativePlatform() && this.deviceId) {
-          await BleClient.write(
-            this.deviceId,
-            BLE_SERVICES.IR_SERVICE,
-            BLE_SERVICES.WIFI_CHAR,
-            numbersToDataView(Array.from(new TextEncoder().encode(payload)))
-          );
-        } else if (this.webWifiChar) {
-          await this.webWifiChar.writeValue(new TextEncoder().encode(payload));
+          }
+        } catch (nativeErr) {
+          console.warn('Native Android Wi-Fi scan not available or permission denied:', nativeErr);
         }
-
-        const bleNets = await scanPromise;
-        if (bleNets && bleNets.length > 0) {
-          const sortedNets = bleNets.sort((a, b) => b.rssi - a.rssi);
-          this.lastScanSource = 'ble';
-          this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas pelo ESP32 via Bluetooth!`;
-          return sortedNets;
-        }
-      } catch (e) {
-        console.error('BLE Scan error', e);
       }
-    }
 
-    // 3. HTTP Scan against ESP32 endpoints: targetIp, known IP, or default SoftAP (192.168.4.1)
-    const candidateIps: string[] = [];
-    if (targetIp && targetIp.trim() && !candidateIps.includes(targetIp.trim())) {
-      candidateIps.push(targetIp.trim());
-    }
-    if (this.state.ipAddress && !candidateIps.includes(this.state.ipAddress)) {
-      candidateIps.push(this.state.ipAddress);
-    }
-    if (!candidateIps.includes('192.168.4.1')) {
-      candidateIps.push('192.168.4.1');
-    }
-    if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname.startsWith('192.168.') && !candidateIps.includes(window.location.hostname)) {
-      candidateIps.push(window.location.hostname);
-    }
+      // 2. BLE Scan request (Native Capacitor BLE or Web Bluetooth connected to ESP32)
+      if (this.state.connected && this.state.connectionType === 'ble') {
+        try {
+          const scanPromise = new Promise<WiFiNetwork[]>((resolve) => {
+            this.wifiScanResolver = resolve;
+            setTimeout(() => {
+              if (this.wifiScanResolver === resolve) {
+                this.wifiScanResolver = null;
+                resolve(this.streamedNetworks);
+              }
+            }, 8000); // 8s timeout because hardware Wi-Fi scans take 2-4 seconds
+          });
 
-    for (const ip of candidateIps) {
-      try {
-        const response = await fetch(`http://${ip}/api/wifi/scan`, {
-          signal: AbortSignal.timeout(4000),
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && data.length > 0) {
-            this.state.ipAddress = ip;
-            this.state.connectionType = 'wifi';
-            this.state.connected = true;
-            this.notify();
-            const sortedNets = (data as WiFiNetwork[]).sort((a, b) => b.rssi - a.rssi);
-            this.lastScanSource = 'http';
-            this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas pelo ESP32 (IP: ${ip})!`;
+          const payload = JSON.stringify({ action: 'scan' });
+
+          if (Capacitor.isNativePlatform() && this.deviceId) {
+            await BleClient.write(
+              this.deviceId,
+              BLE_SERVICES.IR_SERVICE,
+              BLE_SERVICES.WIFI_CHAR,
+              numbersToDataView(Array.from(new TextEncoder().encode(payload)))
+            );
+          } else if (this.webWifiChar) {
+            await this.webWifiChar.writeValue(new TextEncoder().encode(payload));
+          }
+
+          const bleNets = await scanPromise;
+          if (bleNets && bleNets.length > 0) {
+            const sortedNets = bleNets.sort((a, b) => b.rssi - a.rssi);
+            this.lastScanSource = 'ble';
+            this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas pelo ESP32 via Bluetooth!`;
             return sortedNets;
           }
+        } catch (e) {
+          console.error('BLE Scan error', e);
         }
-      } catch (httpErr) {
-        // Continue to next IP
       }
-    }
 
-    // No dummy data: reflect real state truthfully
-    this.lastScanSource = 'none';
-    this.lastScanMessage = 'Nenhuma rede Wi-Fi encontrada. Conecte ao ESP32 via Bluetooth (BLE) ou ao Wi-Fi do ESP32 (192.168.4.1).';
-    return [];
+      // 3. HTTP Scan against ESP32 endpoints: targetIp, known IP, or default SoftAP (192.168.4.1)
+      const candidateIps: string[] = [];
+      if (targetIp && targetIp.trim() && !candidateIps.includes(targetIp.trim())) {
+        candidateIps.push(targetIp.trim());
+      }
+      if (this.state.ipAddress && !candidateIps.includes(this.state.ipAddress)) {
+        candidateIps.push(this.state.ipAddress);
+      }
+      if (!candidateIps.includes('192.168.4.1')) {
+        candidateIps.push('192.168.4.1');
+      }
+      if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname.startsWith('192.168.') && !candidateIps.includes(window.location.hostname)) {
+        candidateIps.push(window.location.hostname);
+      }
+
+      for (const ip of candidateIps) {
+        try {
+          const response = await fetch(`http://${ip}/api/wifi/scan`, {
+            signal: AbortSignal.timeout(4000),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data) && data.length > 0) {
+              this.state.ipAddress = ip;
+              this.state.connectionType = 'wifi';
+              this.state.connected = true;
+              this.notify();
+              const sortedNets = (data as WiFiNetwork[]).sort((a, b) => b.rssi - a.rssi);
+              this.lastScanSource = 'http';
+              this.lastScanMessage = `${sortedNets.length} redes Wi-Fi reais encontradas pelo ESP32 (IP: ${ip})!`;
+              return sortedNets;
+            }
+          }
+        } catch (httpErr) {
+          // Continue to next IP
+        }
+      }
+
+      // No dummy data: reflect real state truthfully
+      this.lastScanSource = 'none';
+      this.lastScanMessage = 'Nenhuma rede Wi-Fi encontrada. Conecte ao ESP32 via Bluetooth (BLE) ou ao Wi-Fi do ESP32 (192.168.4.1).';
+      return [];
+    } finally {
+      this.state.isSyncing = false;
+      this.notify();
+    }
   }
 
   // Test Wi-Fi ping and status to a specific IP
@@ -933,36 +941,40 @@ class ESP32Service {
 
   // Refresh all connections (WiFi and BLE)
   public async refreshConnection() {
+    if (this.state.isSyncing) return { wifi: this.state.wifiConnected, ble: this.state.bleConnected };
+
     this.state.isSyncing = true;
     this.notify();
 
     const results = { wifi: false, ble: false };
 
     try {
-      // 1. WiFi Sync - Try known IP
+      // 1. WiFi Sync - Try known IP first
       if (this.state.ipAddress) {
         const wifiRes = await this.testWiFiConnection(this.state.ipAddress);
         results.wifi = wifiRes.success;
       }
 
-      // 2. If WiFi failed and we have no IP, try common ESP32 IPs or current host
+      // 2. Se falhou, tenta IPs candidatos (Fallback e Auto-Discovery)
       if (!results.wifi) {
-        const candidates = ['192.168.4.1'];
-        if (typeof window !== 'undefined' && window.location.hostname.startsWith('192.168.')) {
-          candidates.push(window.location.hostname);
-        }
+        const candidates = ['192.168.4.1']; // SoftAP do ESP32
+
+        // Se estivermos em um navegador e o IP atual falhou,
+        // tentamos o hostname padrão caso o mDNS esteja funcionando
+        candidates.push('esp32-ir-hub.local');
 
         for (const ip of candidates) {
           if (ip === this.state.ipAddress) continue;
           const res = await this.testWiFiConnection(ip);
           if (res.success) {
             results.wifi = true;
+            this.addLog('success', `ESP32 reencontrado em: ${ip}`);
             break;
           }
         }
       }
 
-      // 3. BLE Check
+      // 3. BLE Check (apenas se nativo)
       if (Capacitor.isNativePlatform()) {
         try {
           const enabled = await BleClient.isEnabled();
@@ -1003,6 +1015,7 @@ export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WebServer.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -1213,7 +1226,7 @@ class WifiCallback: public BLECharacteristicCallbacks {
   }
 };
 
-void setup() {
+  void setup() {
   Serial.begin(115200);
   pinMode(PIN_STATUS_LED, OUTPUT);
   irrecv.enableIRIn();
@@ -1222,7 +1235,15 @@ void setup() {
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
   WiFi.mode(WIFI_AP_STA);
+
+  // Tenta conectar com as credenciais salvas na Flash automaticamente
+  WiFi.begin();
+
   WiFi.softAP("ESP32_IR_HUB_AP", "12345678");
+
+  if (MDNS.begin("esp32-ir-hub")) {
+    Serial.println("mDNS responder started: esp32-ir-hub.local");
+  }
 
   server.on("/api/status", HTTP_GET, handleStatus);
   server.on("/api/pins/config", HTTP_POST, handlePins);
