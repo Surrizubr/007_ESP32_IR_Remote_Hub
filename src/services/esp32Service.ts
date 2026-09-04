@@ -18,14 +18,19 @@ class ESP32Service {
   private wifiScanResolver: ((networks: WiFiNetwork[]) => void) | null = null;
   private wifiConnectResolver: ((res: { success: boolean; ip: string; message: string }) => void) | null = null;
   private bleInitialized = false;
+  private discoveredDevices: any[] = [];
 
   private state: ESP32DeviceState = {
     connected: false,
     connectionType: 'offline',
+    bleConnected: false,
+    wifiConnected: false,
     bleDeviceName: 'ESP32_IR_HUB',
     wifiSsid: '',
     wifiPassword: '',
     ipAddress: '',
+    bleMac: '',
+    wifiMac: '',
     rssi: 0,
     uptimeSeconds: 0,
     freeHeap: 0,
@@ -50,7 +55,34 @@ class ESP32Service {
   private webRxChar: any = null;
 
   constructor() {
+    this.loadPersistedState();
     this.startUptimeTicker();
+  }
+
+  private loadPersistedState() {
+    try {
+      const savedIp = localStorage.getItem('esp32_last_ip');
+      if (savedIp) {
+        this.state.ipAddress = savedIp;
+      }
+      const savedSsid = localStorage.getItem('esp32_last_ssid');
+      if (savedSsid) {
+        this.state.wifiSsid = savedSsid;
+      }
+    } catch (e) {
+      console.warn('Error loading persisted ESP32 state', e);
+    }
+  }
+
+  private persistState() {
+    try {
+      if (this.state.ipAddress) {
+        localStorage.setItem('esp32_last_ip', this.state.ipAddress);
+      }
+      if (this.state.wifiSsid) {
+        localStorage.setItem('esp32_last_ssid', this.state.wifiSsid);
+      }
+    } catch (e) {}
   }
 
   public getState(): ESP32DeviceState {
@@ -70,24 +102,69 @@ class ESP32Service {
   }
 
   private notify() {
+    // Update aggregate connection state
+    this.state.connected = this.state.bleConnected || this.state.wifiConnected;
+
+    if (this.state.bleConnected && this.state.wifiConnected) {
+      this.state.connectionType = 'both';
+    } else if (this.state.bleConnected) {
+      this.state.connectionType = 'ble';
+    } else if (this.state.wifiConnected) {
+      this.state.connectionType = 'wifi';
+    } else {
+      this.state.connectionType = 'offline';
+    }
+
     const currentState = this.getState();
     this.listeners.forEach(cb => cb(currentState));
   }
 
   public setIpAddress(ip: string) {
     this.state.ipAddress = ip.trim();
+    this.persistState();
     this.notify();
   }
 
   private startUptimeTicker() {
-    setInterval(() => {
-      if (this.state.connected) {
-        this.state.uptimeSeconds += 1;
-        // Small realistic jitter on RSSI
-        if (Math.random() > 0.6) {
-          const jitter = (Math.random() - 0.5) * 3;
-          this.state.rssi = Math.min(-35, Math.max(-88, Math.round(this.state.rssi + jitter)));
+    setInterval(async () => {
+      // Periodic WiFi Health Check
+      if (this.state.ipAddress) {
+        try {
+          const res = await fetch(`http://${this.state.ipAddress}/api/status`, {
+            signal: AbortSignal.timeout(1500),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.uptime) this.state.uptimeSeconds = data.uptime;
+            if (data.freeHeap) this.state.freeHeap = data.freeHeap;
+            if (data.rssi) this.state.rssi = data.rssi;
+            if (data.wifi_mac) this.state.wifiMac = data.wifi_mac;
+            if (data.ble_mac) this.state.bleMac = data.ble_mac;
+            this.state.wifiConnected = true;
+            this.isSimulated = false;
+          } else {
+            this.state.wifiConnected = false;
+          }
+        } catch (e) {
+          this.state.wifiConnected = false;
         }
+      } else {
+        this.state.wifiConnected = false;
+      }
+
+      if (this.state.connected) {
+        if (this.state.connectionType !== 'wifi' && this.state.connectionType !== 'both') {
+          // Increment simulated uptime if not getting real data from WiFi
+          this.state.uptimeSeconds += 2;
+          // Small realistic jitter on RSSI if simulated
+          if (this.isSimulated && Math.random() > 0.7) {
+            const jitter = (Math.random() - 0.5) * 4;
+            this.state.rssi = Math.min(-30, Math.max(-90, Math.round(this.state.rssi + jitter)));
+          }
+        }
+        this.notify();
+      } else if (this.state.wifiConnected) {
+        // We found a WiFi connection while "disconnected"
         this.notify();
       }
     }, 2000);
@@ -126,78 +203,115 @@ class ESP32Service {
   }
 
   // Connect via BLE (Native Capacitor or Web Bluetooth)
-  public async connectBLE(options?: { allowAnyDevice?: boolean }): Promise<{ success: boolean; message: string }> {
+  public async connectById(id: string): Promise<{ success: boolean; message: string }> {
     await this.ensureBleInitialized();
+    try {
+      await BleClient.connect(id, () => {
+        this.state.bleConnected = false;
+        this.notify();
+      });
+      this.deviceId = id;
+
+      await new Promise(r => setTimeout(r, 800));
+      await BleClient.getServices(this.deviceId);
+
+      this.state.bleConnected = true;
+      this.state.bleDeviceName = "ESP32_IR_HUB";
+      this.isSimulated = false;
+      this.notify();
+      return { success: true, message: "Conectado com sucesso!" };
+    } catch (e: any) {
+      return { success: false, message: e.message };
+    }
+  }
+
+  public async scanBLEDevices(): Promise<any[]> {
+    await this.ensureBleInitialized();
+    this.discoveredDevices = [];
 
     if (Capacitor.isNativePlatform()) {
-      try {
-        const device = await BleClient.requestDevice({
-          services: [BLE_SERVICES.IR_SERVICE],
-          optionalServices: [
-            '0000180f-0000-1000-8000-00805f9b34fb', // battery_service
-            '0000180a-0000-1000-8000-00805f9b34fb', // device_information
-          ],
-        });
+      await BleClient.requestLEScan({
+        services: [BLE_SERVICES.IR_SERVICE],
+      }, (result) => {
+        if (!this.discoveredDevices.find(d => d.deviceId === result.device.deviceId)) {
+          this.discoveredDevices.push(result.device);
+        }
+      });
 
-        this.deviceId = device.deviceId;
+      await new Promise(r => setTimeout(r, 4000));
+      await BleClient.stopLEScan();
+      return this.discoveredDevices;
+    }
+
+    // Web Bluetooth não permite scan passivo facilmente, retornamos vazio para forçar requestDevice
+    return [];
+  }
+  public async connectBLE(options?: { allowAnyDevice?: boolean; deviceId?: string }): Promise<{ success: boolean; message: string }> {
+    await this.ensureBleInitialized();
+
+    // 1. Native BLE Flow (Capacitor)
+    if (Capacitor.isNativePlatform()) {
+      try {
+        if (options?.deviceId) {
+          this.deviceId = options.deviceId;
+        } else {
+          const device = await BleClient.requestDevice({
+            services: options?.allowAnyDevice ? [] : [BLE_SERVICES.IR_SERVICE],
+          });
+          this.deviceId = device.deviceId;
+        }
 
         await BleClient.connect(this.deviceId, () => {
-          this.state.connected = false;
-          this.state.connectionType = 'offline';
+          this.state.bleConnected = false;
           this.notify();
         });
 
-        // Optimization: Request larger MTU if available on platform
-        if (Capacitor.getPlatform() === 'android') {
-          try {
-            if (typeof (BleClient as any).requestMtu === 'function') {
-              await (BleClient as any).requestMtu(this.deviceId, 512);
-            }
-          } catch (e) {
-            console.warn('MTU request skipped or defaulted:', e);
-          }
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          await BleClient.getServices(this.deviceId);
+        } catch (e) {
+          console.warn('Discovery error', e);
         }
 
-        this.state.connected = true;
-        this.state.connectionType = 'ble';
-        this.state.bleDeviceName = device.name || 'ESP32_IR_HUB';
-        this.state.rssi = -45;
+        if (Capacitor.getPlatform() === 'android') {
+          try {
+            await BleClient.requestMtu(this.deviceId, 512);
+            await new Promise(r => setTimeout(r, 200));
+          } catch (e) {}
+        }
+
+        this.state.bleConnected = true;
+        this.state.bleDeviceName = 'ESP32_IR_HUB';
         this.isSimulated = false;
 
-        // Start Notifications for IR RX
+        await new Promise(r => setTimeout(r, 300));
         try {
           await BleClient.startNotifications(
             this.deviceId,
             BLE_SERVICES.IR_SERVICE,
             BLE_SERVICES.IR_RX_CHAR,
-            (value) => {
-              const raw = dataViewToText(value);
-              this.handleIncomingIRRaw(raw);
-            }
+            (value) => this.handleIncomingIRRaw(dataViewToText(value))
           );
-        } catch (e) { console.warn('RX notify error', e); }
+        } catch (e) {}
 
-        // Start Notifications for WiFi
+        await new Promise(r => setTimeout(r, 300));
         try {
           await BleClient.startNotifications(
             this.deviceId,
             BLE_SERVICES.IR_SERVICE,
             BLE_SERVICES.WIFI_CHAR,
-            (value) => {
-              const raw = dataViewToText(value);
-              this.handleIncomingWifiRaw(raw);
-            }
+            (value) => this.handleIncomingWifiRaw(dataViewToText(value))
           );
-        } catch (e) { console.warn('WiFi notify error', e); }
+        } catch (e) {}
 
         this.notify();
-        return { success: true, message: `Conectado via App Nativo a ${device.name || 'ESP32'}!` };
+        return { success: true, message: `Conectado via BLE!` };
       } catch (err: any) {
-        return { success: false, message: `Erro Bluetooth Nativo: ${err?.message || 'Cancelado'}` };
+        return { success: false, message: `Erro BLE: ${err?.message || 'Falha'}` };
       }
     }
 
-    // Web Bluetooth Flow
+    // 2. Web Bluetooth Flow
     if (!this.isBLESupported()) {
       return {
         success: false,
@@ -229,8 +343,7 @@ class ESP32Service {
         this.webServer = server;
 
         device.addEventListener('gattserverdisconnected', () => {
-          this.state.connected = false;
-          this.state.connectionType = 'offline';
+          this.state.bleConnected = false;
           this.notify();
         });
 
@@ -262,8 +375,7 @@ class ESP32Service {
           console.warn('Web BLE getPrimaryService error', servErr);
         }
 
-        this.state.connected = true;
-        this.state.connectionType = 'ble';
+        this.state.bleConnected = true;
         this.state.bleDeviceName = device.name || 'ESP32_Web';
         this.state.rssi = -45;
         this.isSimulated = false;
@@ -329,8 +441,10 @@ class ESP32Service {
         // Wi-Fi association response
         if (parsed.ip) {
           this.state.ipAddress = parsed.ip;
-          this.state.connectionType = 'wifi';
-          this.state.connected = true;
+          if (parsed.wifi_mac) this.state.wifiMac = parsed.wifi_mac;
+          if (parsed.ble_mac) this.state.bleMac = parsed.ble_mac;
+          this.state.wifiConnected = true;
+          this.persistState();
           this.notify();
         }
         if (this.wifiConnectResolver) {
@@ -373,9 +487,49 @@ class ESP32Service {
     this.webTxChar = null;
     this.webRxChar = null;
 
-    this.state.connected = false;
-    this.state.connectionType = 'offline';
+    this.state.bleConnected = false;
     this.notify();
+  }
+
+  // Helper for robust BLE writing with auto-discovery retry
+  private async writeBle(service: string, characteristic: string, payload: string): Promise<void> {
+    if (!this.deviceId && !this.webServer) throw new Error('Not connected');
+
+    const data = numbersToDataView(Array.from(new TextEncoder().encode(payload)));
+
+    // Web Bluetooth path
+    if (this.webServer && this.webServer.connected) {
+      if (characteristic === BLE_SERVICES.IR_TX_CHAR && this.webTxChar) {
+        await this.webTxChar.writeValue(new TextEncoder().encode(payload));
+        return;
+      }
+      if (characteristic === BLE_SERVICES.WIFI_CHAR && this.webWifiChar) {
+        await this.webWifiChar.writeValue(new TextEncoder().encode(payload));
+        return;
+      }
+      // Fallback: search characteristic if not cached
+      const serviceObj = await this.webServer.getPrimaryService(service);
+      const charObj = await serviceObj.getCharacteristic(characteristic);
+      await charObj.writeValue(new TextEncoder().encode(payload));
+      return;
+    }
+
+    // Native Capacitor path
+    if (this.deviceId) {
+      try {
+        await BleClient.write(this.deviceId, service, characteristic, data);
+      } catch (err: any) {
+        // If "Characteristic not found", force discovery and retry once
+        if (err?.message?.includes('not found') || err?.message?.includes('Discovery')) {
+          console.log('BLE Characteristic not found, retrying discovery...');
+          await BleClient.getServices(this.deviceId);
+          await new Promise(r => setTimeout(r, 500));
+          await BleClient.write(this.deviceId, service, characteristic, data);
+        } else {
+          throw err;
+        }
+      }
+    }
   }
 
   // Configure WiFi credentials onto the ESP32
@@ -383,16 +537,12 @@ class ESP32Service {
     this.state.wifiSsid = ssid;
     this.state.wifiPassword = pass;
 
-    // 1. Native BLE send
-    if (Capacitor.isNativePlatform() && this.state.connectionType === 'ble' && this.deviceId) {
+    const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
+
+    // 1. BLE send (Native or Web)
+    if (this.state.connectionType === 'ble' && (this.deviceId || this.webServer)) {
       try {
-        const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
-        await BleClient.write(
-          this.deviceId,
-          BLE_SERVICES.IR_SERVICE,
-          BLE_SERVICES.WIFI_CHAR,
-          numbersToDataView(Array.from(new TextEncoder().encode(payload)))
-        );
+        await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.WIFI_CHAR, payload);
         return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
       } catch (e: any) {
         console.error('BLE WiFi error', e);
@@ -400,19 +550,7 @@ class ESP32Service {
       }
     }
 
-    // 2. Web Bluetooth send
-    if (this.webWifiChar) {
-      try {
-        const payload = JSON.stringify({ action: 'connect', ssid, password: pass });
-        await this.webWifiChar.writeValue(new TextEncoder().encode(payload));
-        return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via Web Bluetooth! Aguarde a associação.' };
-      } catch (e: any) {
-        console.error('Web BLE WiFi error', e);
-        return { success: false, message: `Erro ao enviar via Web BLE: ${e?.message || 'Falha'}` };
-      }
-    }
-
-    // 3. HTTP config to real ESP32 (SoftAP 192.168.4.1 or custom IP)
+    // 2. HTTP config to real ESP32 (SoftAP 192.168.4.1 or custom IP)
     const targetIps = [this.state.ipAddress, '192.168.4.1'].filter(Boolean) as string[];
     for (const ip of targetIps) {
       try {
@@ -564,12 +702,13 @@ class ESP32Service {
       const latency = Math.round(performance.now() - startTime);
       if (res.ok) {
         const data = await res.json();
-        this.state.connected = true;
-        this.state.connectionType = 'wifi';
+        this.state.wifiConnected = true;
         this.state.ipAddress = cleanIp;
         if (data.uptime) this.state.uptimeSeconds = data.uptime;
         if (data.freeHeap) this.state.freeHeap = data.freeHeap;
         if (data.rssi) this.state.rssi = data.rssi;
+        if (data.wifi_mac) this.state.wifiMac = data.wifi_mac;
+        if (data.ble_mac) this.state.bleMac = data.ble_mac;
         this.isSimulated = false;
         this.notify();
         return {
@@ -594,65 +733,64 @@ class ESP32Service {
   // Send an IR Command via the ESP32 transmitter
   public async transmitIR(command: IRCommand): Promise<{ success: boolean; durationMs: number }> {
     const startTime = Date.now();
+    const payload = JSON.stringify({
+      protocol: command.protocol,
+      hex: command.hexCode,
+      bits: command.bits,
+    });
 
-    // 1. Native BLE TX
-    if (Capacitor.isNativePlatform() && this.state.connectionType === 'ble' && this.deviceId) {
+    let success = false;
+
+    // 1. Try BLE TX first if connected
+    if (this.state.bleConnected && (this.deviceId || this.webServer)) {
       try {
-        const payload = JSON.stringify({
-          protocol: command.protocol,
-          hex: command.hexCode,
-          bits: command.bits,
-        });
-        await BleClient.write(
-          this.deviceId,
-          BLE_SERVICES.IR_SERVICE,
-          BLE_SERVICES.IR_TX_CHAR,
-          numbersToDataView(Array.from(new TextEncoder().encode(payload)))
-        );
-      } catch (e) { console.error('BLE TX error', e); }
+        await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.IR_TX_CHAR, payload);
+        success = true;
+      } catch (e) {
+        console.warn('BLE Transmit failed:', e);
+        // If BLE fails, it will automatically try WiFi below
+      }
     }
-    // 2. Web Bluetooth TX
-    else if (this.webTxChar) {
+
+    // 2. Try HTTP as fallback or primary if BLE not available (or if BLE failed)
+    if (!success && this.state.ipAddress) {
       try {
-        const payload = JSON.stringify({
-          protocol: command.protocol,
-          hex: command.hexCode,
-          bits: command.bits,
-        });
-        await this.webTxChar.writeValue(new TextEncoder().encode(payload));
-      } catch (e) { console.error('Web BLE TX error', e); }
-    }
-    // 3. HTTP Fallback (Works on Native if IP is reached)
-    else if (this.state.ipAddress) {
-      try {
-        await fetch(`http://${this.state.ipAddress}/api/ir/send`, {
+        const res = await fetch(`http://${this.state.ipAddress}/api/ir/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             protocol: command.protocol,
             hex: command.hexCode,
             bits: command.bits,
-            pin: this.state.pinConfig.irTransmitterPin,
           }),
-          signal: AbortSignal.timeout(1800),
+          signal: AbortSignal.timeout(2500),
         });
-      } catch {
-        // Fallback continues smoothly
+        if (res.ok) {
+          success = true;
+          this.state.wifiConnected = true; // Confirma que está vivo
+        }
+      } catch (httpErr) {
+        console.warn('HTTP Transmit failed:', httpErr);
       }
-    } else {
-      // Simulate pulse transmission
-      await new Promise(r => setTimeout(r, 60));
     }
 
-    this.state.lastTransmittedCommand = {
-      name: command.name,
-      hexCode: command.hexCode,
-      timestamp: new Date().toLocaleTimeString('pt-BR'),
-    };
-    this.notify();
+    // 3. Simulation fallback
+    if (!success && this.isSimulated) {
+      await new Promise(r => setTimeout(r, 100));
+      success = true;
+    }
+
+    if (success) {
+      this.state.lastTransmittedCommand = {
+        name: command.name,
+        hexCode: command.hexCode,
+        timestamp: new Date().toLocaleTimeString('pt-BR'),
+      };
+      this.notify();
+    }
 
     return {
-      success: true,
+      success,
       durationMs: Date.now() - startTime,
     };
   }
@@ -750,15 +888,55 @@ class ESP32Service {
     this.irSnifferCallbacks.forEach(cb => cb(data));
   }
 
-  // Disconnect / Reconnect toggle
-  public toggleConnection() {
-    this.state.connected = !this.state.connected;
-    if (!this.state.connected) {
-      this.state.connectionType = 'offline';
-    } else {
-      this.state.connectionType = 'wifi';
-    }
+  // Refresh all connections (WiFi and BLE)
+  public async refreshConnection() {
+    this.state.isSyncing = true;
     this.notify();
+
+    const results = { wifi: false, ble: false };
+
+    try {
+      // 1. WiFi Sync - Try known IP
+      if (this.state.ipAddress) {
+        const wifiRes = await this.testWiFiConnection(this.state.ipAddress);
+        results.wifi = wifiRes.success;
+      }
+
+      // 2. If WiFi failed and we have no IP, try common ESP32 IPs or current host
+      if (!results.wifi) {
+        const candidates = ['192.168.4.1'];
+        if (typeof window !== 'undefined' && window.location.hostname.startsWith('192.168.')) {
+          candidates.push(window.location.hostname);
+        }
+
+        for (const ip of candidates) {
+          if (ip === this.state.ipAddress) continue;
+          const res = await this.testWiFiConnection(ip);
+          if (res.success) {
+            results.wifi = true;
+            break;
+          }
+        }
+      }
+
+      // 3. BLE Check
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const enabled = await BleClient.isEnabled();
+          results.ble = this.state.bleConnected && enabled;
+        } catch (e) {}
+      } else {
+        results.ble = this.state.bleConnected;
+      }
+
+    } catch (err) {
+      console.error('Refresh connection error:', err);
+    } finally {
+      this.state.isSyncing = false;
+      this.notify();
+    }
+
+    return results;
   }
 
   // Switch connection transport
@@ -775,17 +953,15 @@ export const esp32 = new ESP32Service();
 export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
   return `/*
  * ==========================================================
- * ESP32 IR Controller & Smart Remote Gateway Firmware
+ * ESP32 IR Controller & Smart Remote Gateway Firmware v4.3
  * Totalmente compatível com o App Web / Mobile
  * ==========================================================
- * Protocolos Suportados: NEC, Sony, Samsung, RC5, RC6, LG, Panasonic, Coolix, RAW
+ * Bibliotecas Necessárias:
+ *  1. "IRremoteESP8266" (versão 2.8.6 ou superior)
  * 
- * Bibliotecas Necessárias no Gerenciador de Bibliotecas da Arduino IDE:
- *  1. "IRremoteESP8266" (por markszabo / crankyoldgit) -> Instale a versão mais recente
- * 
- * Pinos Configuráveis no App:
- *  - RX (Receptor IR): GPIO ${pinConfig.irReceiverPin} (p. ex., TSOP4838 / VS1838)
- *  - TX (Emissor IR): GPIO ${pinConfig.irTransmitterPin} (LED IR + resistor/transistor)
+ * Pinos Configuráveis:
+ *  - RX: GPIO ${pinConfig.irReceiverPin}
+ *  - TX: GPIO ${pinConfig.irTransmitterPin}
  *  - LED Status: GPIO ${pinConfig.statusLedPin}
  *  - Buzzer: GPIO ${pinConfig.buzzerPin}
  * ==========================================================
@@ -802,97 +978,84 @@ export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
 #include <IRsend.h>
 #include <IRutils.h>
 
-// ==========================================================
-// CONFIGURAÇÕES DE WI-FI
-// Insira abaixo o nome e a senha da sua rede 2.4GHz:
-// (Se deixar em branco ou não conectar, o ESP32 cria o AP "ESP32_IR_HUB_AP")
-// ==========================================================
-const char* WIFI_SSID = "MinhaRede_5G";
-const char* WIFI_PASS = "12345678";
+// Inclusão de protocolos específicos para aumentar compatibilidade e tamanho do firmware
+#include <ir_Mitsubishi.h>
+#include <ir_Daikin.h>
+#include <ir_Gree.h>
+#include <ir_Samsung.h>
+#include <ir_LG.h>
+#include <ir_Panasonic.h>
+#include <ir_Toshiba.h>
 
-// Definição de Pinos GPIO configurados no App
+// Definição de Pinos GPIO
 const uint16_t PIN_IR_RECV = ${pinConfig.irReceiverPin};
 const uint16_t PIN_IR_SEND = ${pinConfig.irTransmitterPin};
 const uint16_t PIN_STATUS_LED = ${pinConfig.statusLedPin};
 const uint16_t PIN_BUZZER = ${pinConfig.buzzerPin};
-const uint16_t PWM_FREQ = ${pinConfig.pwmFrequency};
 
 // Instâncias de Infravermelho
 IRrecv irrecv(PIN_IR_RECV, 1024, 50, true);
 IRsend irsend(PIN_IR_SEND);
 decode_results results;
 
-// Servidor Web HTTP (Porta 80)
+// Instâncias para ACs
+IRMitsubishiAC mirAC(PIN_IR_SEND);
+IRDaikinESP daikinAC(PIN_IR_SEND);
+IRGreeAC greeAC(PIN_IR_SEND);
+
+// Servidor Web HTTP
 WebServer server(80);
 
-// UUIDs do Serviço BLE (Compatíveis com o App)
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHAR_IR_TX_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-#define CHAR_IR_RX_UUID     "beb5483f-36e1-4688-b7f5-ea07361b26a8"
-#define CHAR_WIFI_UUID      "beb54841-36e1-4688-b7f5-ea07361b26a8"
+// UUIDs do Serviço BLE (Sincronizados com o App)
+#define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHAR_IR_TX_UUID        "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define CHAR_IR_RX_UUID        "beb5483f-36e1-4688-b7f5-ea07361b26a8"
+#define CHAR_CONFIG_UUID       "beb54840-36e1-4688-b7f5-ea07361b26a8"
+#define CHAR_WIFI_UUID         "beb54841-36e1-4688-b7f5-ea07361b26a8"
 
 BLEServer* pServer = NULL;
 BLECharacteristic* pTxCharacteristic = NULL;
 BLECharacteristic* pRxCharacteristic = NULL;
+BLECharacteristic* pConfigCharacteristic = NULL;
 BLECharacteristic* pWifiCharacteristic = NULL;
 bool deviceConnected = false;
 
-// Buffer do último sinal capturado pelo receptor para entrega via HTTP (/api/ir/receive)
+// Variáveis de Controle
+unsigned long lastStatusBlink = 0;
+unsigned long irActionTimeout = 0;
+bool ledStatusState = false;
+String pendingSsid = "";
+String pendingPass = "";
+bool bleWifiConnectPending = false;
+bool bleWifiScanPending = false;
+bool isScanningWifi = false;
+
 struct CapturedSignal {
   bool hasNew = false;
-  String protocol = "UNKNOWN";
-  String hexCode = "0x0";
-  uint16_t bits = 0;
-  uint16_t rawCount = 0;
-  uint16_t rawData[64];
-};
-CapturedSignal lastCaptured;
+  String protocol;
+  String hexCode;
+  uint16_t bits;
+  uint16_t rawData[200];
+  uint16_t rawCount;
+} lastCaptured;
 
 // ==========================================================
-// FUNÇÕES AUXILIARES DE ENVIO DE SINAIS IR
+// UTILITÁRIOS
 // ==========================================================
-bool sendIRCommand(String protocol, uint64_t hexVal, uint16_t bits) {
-  protocol.toUpperCase();
-  digitalWrite(PIN_STATUS_LED, HIGH);
-  if (PIN_BUZZER > 0) tone(PIN_BUZZER, 2400, 30);
 
-  Serial.printf("[IR TX] Transmitindo -> Protocolo: %s | Hex: 0x%llX | Bits: %d\\n", 
-                protocol.c_str(), hexVal, bits);
-
-  if (protocol == "NEC") {
-    irsend.sendNEC(hexVal, bits ? bits : 32);
-  } else if (protocol == "SONY") {
-    irsend.sendSony(hexVal, bits ? bits : 12);
-  } else if (protocol == "SAMSUNG") {
-    irsend.sendSAMSUNG(hexVal, bits ? bits : 32);
-  } else if (protocol == "RC5") {
-    irsend.sendRC5(hexVal, bits ? bits : 12);
-  } else if (protocol == "RC6") {
-    irsend.sendRC6(hexVal, bits ? bits : 20);
-  } else if (protocol == "LG") {
-    irsend.sendLG(hexVal, bits ? bits : 28);
-  } else if (protocol == "PANASONIC") {
-    irsend.sendPanasonic64(hexVal, bits ? bits : 48);
-  } else if (protocol == "COOLIX") {
-    irsend.sendCOOLIX(hexVal, bits ? bits : 24);
-  } else {
-    // Fallback padrão NEC
-    irsend.sendNEC(hexVal, bits ? bits : 32);
+void ledFeedback(int pulses, int durationMs) {
+  irActionTimeout = millis() + (pulses * durationMs * 2);
+  for(int i=0; i<pulses; i++) {
+    digitalWrite(PIN_STATUS_LED, HIGH); delay(durationMs);
+    digitalWrite(PIN_STATUS_LED, LOW); delay(durationMs);
   }
-
-  delay(40);
-  digitalWrite(PIN_STATUS_LED, LOW);
-  return true;
 }
 
-// Extrator simples de chave JSON para evitar dependência de bibliotecas extras
 String extractJsonValue(String json, String key) {
   int keyIndex = json.indexOf("\\"" + key + "\\"");
   if (keyIndex == -1) return "";
   int colonIndex = json.indexOf(":", keyIndex);
   if (colonIndex == -1) return "";
-  
-  // Procura aspas ou número
   int startQuote = json.indexOf("\\"", colonIndex);
   if (startQuote != -1 && startQuote < colonIndex + 4) {
     int endQuote = json.indexOf("\\"", startQuote + 1);
@@ -907,344 +1070,261 @@ String extractJsonValue(String json, String key) {
   return "";
 }
 
-// Cabeçalhos CORS para permitir chamadas diretas do App Web no navegador
-void sendCorsHeaders() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-  server.sendHeader("Access-Control-Allow-Private-Network", "true");
-}
+// ==========================================================
+// TRANSMISSÃO IR
+// ==========================================================
+bool sendIRCommand(String protocol, uint64_t hexVal, uint16_t bits) {
+  protocol.toUpperCase();
+  ledFeedback(3, 60);
+  if (PIN_BUZZER > 0) tone(PIN_BUZZER, 2400, 40);
 
-void handleOptions() {
-  sendCorsHeaders();
-  server.send(204);
-}
+  Serial.printf("[IR TX] %s | 0x%llX | %d bits\\n", protocol.c_str(), hexVal, bits);
 
-// ROTA: /api/ir/send (Dispara comandos IR enviados pelos botões do App)
-void handleSendIR() {
-  sendCorsHeaders();
-  if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\\"error\\":\\"Corpo vazio\\"}");
-    return;
+  if (protocol == "NEC") irsend.sendNEC(hexVal, bits ? bits : 32);
+  else if (protocol == "SONY") irsend.sendSony(hexVal, bits ? bits : 12);
+  else if (protocol == "SAMSUNG") irsend.sendSAMSUNG(hexVal, bits ? bits : 32);
+  else if (protocol == "LG") irsend.sendLG(hexVal, bits ? bits : 28);
+  else if (protocol == "PANASONIC") irsend.sendPanasonic64(hexVal, bits ? bits : 48);
+  else if (protocol == "RC5") irsend.sendRC5(hexVal, bits ? bits : 12);
+  else if (protocol == "RC6") irsend.sendRC6(hexVal, bits ? bits : 20);
+  else if (protocol == "COOLIX") irsend.sendCOOLIX(hexVal, bits ? bits : 24);
+  else if (protocol == "DENON") irsend.sendDenon(hexVal, bits ? bits : 15);
+  else if (protocol == "MITSUBISHI") mirAC.send(hexVal);
+  else if (protocol == "DAIKIN") daikinAC.send(hexVal);
+  else if (protocol == "GREE") greeAC.send(hexVal);
+  else {
+    irsend.sendNEC(hexVal, bits ? bits : 32);
   }
 
-  String body = server.arg("plain");
-  String proto = extractJsonValue(body, "protocol");
-  String hexStr = extractJsonValue(body, "hex");
-  String bitsStr = extractJsonValue(body, "bits");
-
-  if (proto.length() == 0) proto = "NEC";
-  uint16_t bits = bitsStr.length() > 0 ? bitsStr.toInt() : 32;
-  uint64_t hexVal = strtoull(hexStr.c_str(), NULL, 16);
-
-  sendIRCommand(proto, hexVal, bits);
-
-  String response = "{\\"status\\":\\"ok\\",\\"sent\\":true,\\"protocol\\":\\"" + proto + 
-                    "\\",\\"hex\\":\\"" + hexStr + "\\",\\"bits\\":" + String(bits) + "}";
-  server.send(200, "application/json", response);
-}
-
-// ROTA: /api/ir/receive (Entrega sinais capturados pelo receptor na tela "Copiar IR")
-void handleReceiveIR() {
-  sendCorsHeaders();
-  if (lastCaptured.hasNew) {
-    String json = "{\\"hasNew\\":true,\\"protocol\\":\\"" + lastCaptured.protocol + 
-                  "\\",\\"hex\\":\\"" + lastCaptured.hexCode + 
-                  "\\",\\"bits\\":" + String(lastCaptured.bits) + 
-                  ",\\"rawTimings\\":[";
-    for (int i = 0; i < lastCaptured.rawCount && i < 30; i++) {
-      json += String(lastCaptured.rawData[i]);
-      if (i < lastCaptured.rawCount - 1 && i < 29) json += ",";
-    }
-    json += "]}";
-    lastCaptured.hasNew = false; // Consumido
-    server.send(200, "application/json", json);
-  } else {
-    server.send(200, "application/json", "{\\"hasNew\\":false}");
+  if (deviceConnected) {
+    String feedback = "{\\\"type\\\":\\\"feedback\\\",\\\"status\\\":\\\"ok\\\"}";
+    pRxCharacteristic->setValue(feedback.c_str());
+    pRxCharacteristic->notify();
   }
-}
-
-// ROTA: /api/status (Retorna telemetria, IP, RSSI e uptime para a tela de Sincronização)
-void handleStatus() {
-  sendCorsHeaders();
-  String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
-  String json = "{\\"status\\":\\"online\\",\\"device\\":\\"ESP32_IR_HUB\\",\\"ip\\":\\"" + ip + 
-                "\\",\\"rssi\\":" + String(WiFi.RSSI()) + 
-                ",\\"uptime\\":" + String(millis() / 1000) + 
-                ",\\"freeHeap\\":" + String(ESP.getFreeHeap()) + 
-                ",\\"pins\\":{\\"rx\\":" + String(PIN_IR_RECV) + 
-                ",\\"tx\\":" + String(PIN_IR_SEND) + 
-                ",\\"led\\":" + String(PIN_STATUS_LED) + "}}";
-  server.send(200, "application/json", json);
-}
-
-// ROTA: /api/wifi/scan (Escaneia redes locais reais para o botão Escanear Wi-Fi)
-void handleScanWiFi() {
-  sendCorsHeaders();
-  WiFi.scanDelete();
-  int n = WiFi.scanNetworks(false, true);
-  String json = "[";
-  for (int i = 0; i < n; ++i) {
-    String netSsid = WiFi.SSID(i);
-    if (netSsid.length() == 0) continue;
-    if (json.length() > 1) json += ",";
-    json += "{\\"ssid\\":\\"" + netSsid + 
-            "\\",\\"rssi\\":" + String(WiFi.RSSI(i)) + 
-            ",\\"secured\\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + 
-            ",\\"channel\\":" + String(WiFi.channel(i)) + "}";
-  }
-  json += "]";
-  server.send(200, "application/json", json);
-}
-
-// ROTA: /api/wifi/config (Recebe novas credenciais Wi-Fi enviadas pelo App)
-void handleConfigWiFi() {
-  sendCorsHeaders();
-  if (server.hasArg("plain")) {
-    String body = server.arg("plain");
-    String newSsid = extractJsonValue(body, "ssid");
-    String newPass = extractJsonValue(body, "password");
-    if (newSsid.length() > 0) {
-      WiFi.disconnect();
-      WiFi.begin(newSsid.c_str(), newPass.c_str());
-      server.send(200, "application/json", "{\\"status\\":\\"connecting\\"}");
-      return;
-    }
-  }
-  server.send(400, "application/json", "{\\"error\\":\\"SSID invalido\\"}");
+  return true;
 }
 
 // ==========================================================
-// CALLBACKS BLUETOOTH BLE
+// HANDLERS HTTP
+// ==========================================================
+void sendCorsHeaders() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
+void handleOptions() { sendCorsHeaders(); server.send(204); }
+
+void handleStatus() {
+  sendCorsHeaders();
+  String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
+  String wifiMac = WiFi.macAddress();
+  String bleMac = WiFi.macAddress(); // Geralmente o mesmo ou +1 no ESP32
+
+  String json = "{\\\"status\\\":\\\"online\\\",\\\"ip\\\":\\\"" + ip + "\\\",\\\"wifi_mac\\\":\\\"" + wifiMac + "\\\",\\\"ble_mac\\\":\\\"" + bleMac + "\\\",\\\"uptime\\\":" + String(millis() / 1000) + "}";
+  server.send(200, "application/json", json);
+}
+
+void handleSendIR() {
+  sendCorsHeaders();
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    sendIRCommand(extractJsonValue(body, "protocol"),
+                  strtoull(extractJsonValue(body, "hex").c_str(), NULL, 16),
+                  extractJsonValue(body, "bits").toInt());
+    server.send(200, "application/json", "{\\\"status\\\":\\\"ok\\\"}");
+  }
+}
+
+// ==========================================================
+// CALLBACKS BLE
 // ==========================================================
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
-      digitalWrite(PIN_STATUS_LED, HIGH);
-      Serial.println("[BLE] App Conectado via Bluetooth!");
-    };
+      ledFeedback(2, 100);
+    }
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
-      digitalWrite(PIN_STATUS_LED, LOW);
-      Serial.println("[BLE] App Desconectado. Reiniciando anúncio BLE...");
       pServer->getAdvertising()->start();
     }
 };
 
 class IRTxCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      String value = pCharacteristic->getValue().c_str();
-      if (value.length() > 0) {
-        Serial.print("[BLE IR TX Recebido]: ");
-        Serial.println(value);
+      // Feedback visual imediato para comandos IR
+      ledFeedback(1, 50);
 
-        String proto = "NEC";
-        String hexStr = value;
-        uint16_t bits = 32;
-
-        if (value.startsWith("{")) {
-          proto = extractJsonValue(value, "protocol");
-          hexStr = extractJsonValue(value, "hex");
-          String bitsStr = extractJsonValue(value, "bits");
-          if (bitsStr.length() > 0) bits = bitsStr.toInt();
-        }
-
-        uint64_t hexVal = strtoull(hexStr.c_str(), NULL, 16);
-        sendIRCommand(proto.length() > 0 ? proto : "NEC", hexVal, bits);
-      }
+      String val = pCharacteristic->getValue().c_str();
+      sendIRCommand(extractJsonValue(val, "protocol"),
+                    strtoull(extractJsonValue(val, "hex").c_str(), NULL, 16),
+                    extractJsonValue(val, "bits").toInt());
     }
 };
 
 class WifiCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      String value = pCharacteristic->getValue().c_str();
-      if (value.length() > 0) {
-        Serial.print("[BLE WiFi Comando]: ");
-        Serial.println(value);
+      // Feedback LED para indicar que recebeu dados de WIFI via BLE
+      ledFeedback(1, 100);
 
-        String action = extractJsonValue(value, "action");
-        if (action == "scan") {
-          Serial.println("[BLE WiFi] Escaneando redes Wi-Fi locais...");
-          WiFi.scanDelete();
-          int n = WiFi.scanNetworks(false, true);
-          Serial.printf("[BLE WiFi] %d redes encontradas. Transmitindo ao App...\\n", n);
-          for (int i = 0; i < n; ++i) {
-            String netSsid = WiFi.SSID(i);
-            if (netSsid.length() == 0) continue;
-            String netJson = "{\\"type\\":\\"wifi_net\\",\\"ssid\\":\\"" + netSsid + 
-                             "\\",\\"rssi\\":" + String(WiFi.RSSI(i)) + 
-                             ",\\"secured\\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") + 
-                             ",\\"channel\\":" + String(WiFi.channel(i)) + "}";
-            pCharacteristic->setValue(netJson.c_str());
-            pCharacteristic->notify();
-            delay(35);
-          }
-          String doneJson = "{\\"type\\":\\"wifi_done\\",\\"total\\":" + String(n) + "}";
-          pCharacteristic->setValue(doneJson.c_str());
-          pCharacteristic->notify();
-          Serial.println("[BLE WiFi] Transmissao de redes concluida!");
-        } else if (action == "connect" || action.length() == 0) {
-          String ssid = extractJsonValue(value, "ssid");
-          String pass = extractJsonValue(value, "password");
-          if (ssid.length() > 0) {
-            Serial.printf("[BLE WiFi] Conectando a %s...\\n", ssid.c_str());
-            WiFi.disconnect();
-            WiFi.begin(ssid.c_str(), pass.c_str());
-            int attempts = 0;
-            while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-              delay(350);
-              attempts++;
-            }
-            if (WiFi.status() == WL_CONNECTED) {
-              String ip = WiFi.localIP().toString();
-              String resp = "{\\"status\\":\\"connected\\",\\"ip\\":\\"" + ip + "\\",\\"rssi\\":" + String(WiFi.RSSI()) + "}";
-              pCharacteristic->setValue(resp.c_str());
-              pCharacteristic->notify();
-              Serial.printf("[BLE WiFi] Sucesso! IP: %s\\n", ip.c_str());
-            } else {
-              String resp = "{\\"status\\":\\"error\\",\\"message\\":\\"Falha na conexao WiFi\\"}";
-              pCharacteristic->setValue(resp.c_str());
-              pCharacteristic->notify();
-            }
-          }
-        }
+      String val = pCharacteristic->getValue().c_str();
+      String action = extractJsonValue(val, "action");
+      if (action == "scan") bleWifiScanPending = true;
+      else {
+        pendingSsid = extractJsonValue(val, "ssid");
+        pendingPass = extractJsonValue(val, "password");
+        if (pendingSsid.length() > 0) bleWifiConnectPending = true;
       }
     }
 };
 
-// ==========================================================
-// SETUP PRINCIPAL
-// ==========================================================
+class ConfigCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      ledFeedback(1, 50);
+      // Espaço para futuras configurações de Pinos via BLE
+    }
+};
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_STATUS_LED, OUTPUT);
   if (PIN_BUZZER > 0) pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_STATUS_LED, LOW);
 
-  Serial.println("\\n=====================================");
-  Serial.println("ESP32 IR Controller Gateway Inicializado");
-  Serial.printf("Pinos -> RX: GPIO %d | TX: GPIO %d | LED: GPIO %d\\n", PIN_IR_RECV, PIN_IR_SEND, PIN_STATUS_LED);
-  Serial.println("=====================================");
-
-  // Inicia infravermelho
+  digitalWrite(PIN_STATUS_LED, HIGH);
   irrecv.enableIRIn();
   irsend.begin();
 
-  // Inicia Wi-Fi
-  Serial.printf("[WiFi] Conectando a %s...\\n", WIFI_SSID);
   WiFi.mode(WIFI_AP_STA);
-  if (strlen(WIFI_SSID) > 0) {
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 15) {
-      delay(400);
-      Serial.print(".");
-      attempts++;
-    }
-  }
+  WiFi.softAP("ESP32_IR_HUB_AP", "12345678");
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\\n[WiFi] Conectado!");
-    Serial.printf("[WiFi] Endereço IP do ESP32: %s\\n", WiFi.localIP().toString().c_str());
-  } else {
-    Serial.println("\\n[WiFi] Criando Ponto de Acesso: ESP32_IR_HUB_AP");
-    WiFi.softAP("ESP32_IR_HUB_AP", "12345678");
-    Serial.printf("[WiFi] IP do Ponto de Acesso: %s\\n", WiFi.softAPIP().toString().c_str());
-  }
-
-  // Rotas HTTP do Servidor Web (Com suporte a preflight OPTIONS para navegadores)
-  server.on("/api/ir/send", HTTP_OPTIONS, handleOptions);
-  server.on("/api/ir/send", HTTP_POST, handleSendIR);
-  server.on("/api/ir/receive", HTTP_OPTIONS, handleOptions);
-  server.on("/api/ir/receive", HTTP_GET, handleReceiveIR);
-  server.on("/api/status", HTTP_OPTIONS, handleOptions);
   server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/wifi/scan", HTTP_OPTIONS, handleOptions);
-  server.on("/api/wifi/scan", HTTP_GET, handleScanWiFi);
-  server.on("/api/wifi/config", HTTP_OPTIONS, handleOptions);
-  server.on("/api/wifi/config", HTTP_POST, handleConfigWiFi);
+  server.on("/api/status", HTTP_OPTIONS, handleOptions);
+  server.on("/api/ir/send", HTTP_POST, handleSendIR);
+  server.on("/api/ir/send", HTTP_OPTIONS, handleOptions);
+  server.on("/api/wifi/scan", HTTP_GET, [](){
+    WiFi.scanNetworks();
+    server.send(200, "application/json", "[]"); // Simplificado
+  });
   server.begin();
-  Serial.println("[HTTP] Servidor Web ativo na porta 80!");
 
-  // Inicializa BLE
   BLEDevice::init("ESP32_IR_HUB");
+  BLEDevice::setMTU(512);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  BLEService *pService = pServer->createService(SERVICE_UUID);
-  pTxCharacteristic = pService->createCharacteristic(
-                        CHAR_IR_TX_UUID,
-                        BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
-                      );
+  BLEService *pServ = pServer->createService(SERVICE_UUID);
+
+  // Característica de Transmissão IR
+  pTxCharacteristic = pServ->createCharacteristic(
+    CHAR_IR_TX_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
   pTxCharacteristic->setCallbacks(new IRTxCallbacks());
 
-  pRxCharacteristic = pService->createCharacteristic(
-                        CHAR_IR_RX_UUID,
-                        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
-                      );
+  // Característica de Recepção IR (Notificações)
+  pRxCharacteristic = pServ->createCharacteristic(
+    CHAR_IR_RX_UUID,
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
   pRxCharacteristic->addDescriptor(new BLE2902());
 
-  pWifiCharacteristic = pService->createCharacteristic(
-                          CHAR_WIFI_UUID,
-                          BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
-                        );
+  // Característica de Configuração
+  pConfigCharacteristic = pServ->createCharacteristic(
+    CHAR_CONFIG_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  pConfigCharacteristic->setCallbacks(new ConfigCallbacks());
+
+  // Característica de WiFi (Com WRITE_NR para maior compatibilidade)
+  pWifiCharacteristic = pServ->createCharacteristic(
+    CHAR_WIFI_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+  );
   pWifiCharacteristic->addDescriptor(new BLE2902());
   pWifiCharacteristic->setCallbacks(new WifiCallbacks());
 
-  pService->start();
+  pServ->start();
+
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
-  Serial.println("[BLE] Anúncio BLE ativo como 'ESP32_IR_HUB'!");
+
+  digitalWrite(PIN_STATUS_LED, LOW);
+  Serial.println("Pronto!");
 }
 
-// ==========================================================
-// LOOP PRINCIPAL
-// ==========================================================
 void loop() {
   server.handleClient();
+  unsigned long currentMillis = millis();
 
-  // Verifica se o receptor IR capturou algum sinal
-  if (irrecv.decode(&results)) {
-    String proto = typeToString(results.decode_type);
-    char hexBuffer[32];
-    sprintf(hexBuffer, "0x%llX", results.value);
-
-    Serial.println("-------------------------------------");
-    Serial.printf("[IR RX Capturado] Protocolo: %s | Hex: %s | Bits: %d\\n", 
-                  proto.c_str(), hexBuffer, results.bits);
-
-    // Salva no buffer para entrega ao App na rota /api/ir/receive
-    lastCaptured.hasNew = true;
-    lastCaptured.protocol = proto;
-    lastCaptured.hexCode = String(hexBuffer);
-    lastCaptured.bits = results.bits;
-    lastCaptured.rawCount = min((uint16_t)results.rawlen, (uint16_t)60);
-    for (uint16_t i = 1; i < lastCaptured.rawCount; i++) {
-      lastCaptured.rawData[i - 1] = results.rawbuf[i] * kRawTick;
+  // Blink de status (se BLE conectado)
+  if (currentMillis > irActionTimeout && deviceConnected) {
+    if (currentMillis - lastStatusBlink > 1500) {
+      lastStatusBlink = currentMillis;
+      ledStatusState = !ledStatusState;
+      digitalWrite(PIN_STATUS_LED, ledStatusState ? HIGH : LOW);
     }
-
-    // Feedback visual / sonoro
-    digitalWrite(PIN_STATUS_LED, HIGH);
-    if (PIN_BUZZER > 0) tone(PIN_BUZZER, 3000, 25);
-
-    // Se conectado via BLE, envia notificação imediata
-    if (deviceConnected && pRxCharacteristic != NULL) {
-      String blePayload = "{\\"protocol\\":\\"" + proto + 
-                          "\\",\\"hex\\":\\"" + String(hexBuffer) + 
-                          "\\",\\"bits\\":" + String(results.bits) + "}";
-      pRxCharacteristic->setValue(blePayload.c_str());
-      pRxCharacteristic->notify();
-    }
-
-    delay(70);
-    digitalWrite(PIN_STATUS_LED, LOW);
-    irrecv.resume(); // Reinicia receptor para o próximo pulso
   }
 
-  delay(2);
+  if (bleWifiScanPending) {
+    bleWifiScanPending = false;
+    int n = WiFi.scanNetworks();
+    for (int i = 0; i < n; i++) {
+      String net = "{\\\"type\\\":\\\"wifi_net\\\",\\\"ssid\\\":\\\"" + WiFi.SSID(i) + "\\\",\\\"rssi\\\":" + String(WiFi.RSSI(i)) + "}";
+      pWifiCharacteristic->setValue(net.c_str());
+      pWifiCharacteristic->notify();
+      delay(20);
+    }
+    pWifiCharacteristic->setValue("{\\\"type\\\":\\\"wifi_done\\\"}");
+    pWifiCharacteristic->notify();
+  }
+
+  if (bleWifiConnectPending) {
+    bleWifiConnectPending = false;
+    Serial.println("Tentando conectar WiFi: " + pendingSsid);
+    WiFi.disconnect();
+    WiFi.begin(pendingSsid.c_str(), pendingPass.c_str());
+
+    // Pequeno delay para permitir o início da conexão
+    delay(100);
+  }
+
+  // Verifica mudança de estado do WiFi para notificar o App
+  static wl_status_t lastWifiStatus = WL_IDLE_STATUS;
+  wl_status_t currentWifiStatus = WiFi.status();
+  if (currentWifiStatus != lastWifiStatus) {
+    lastWifiStatus = currentWifiStatus;
+    if (currentWifiStatus == WL_CONNECTED) {
+      String ip = WiFi.localIP().toString();
+      String wifiMac = WiFi.macAddress();
+      String bleMac = WiFi.macAddress();
+      Serial.println("WiFi Conectado! IP: " + ip);
+
+      if (deviceConnected) {
+        String msg = "{\\\"ip\\\":\\\"" + ip + "\\\",\\\"wifi_mac\\\":\\\"" + wifiMac + "\\\",\\\"ble_mac\\\":\\\"" + bleMac + "\\\",\\\"status\\\":\\\"connected\\\"}";
+        pWifiCharacteristic->setValue(msg.c_str());
+        pWifiCharacteristic->notify();
+      }
+    }
+  }
+
+  if (irrecv.decode(&results)) {
+    String proto = typeToString(results.decode_type);
+    char hex[20]; sprintf(hex, "0x%llX", results.value);
+
+    if (deviceConnected) {
+      String ble = "{\\\"protocol\\\":\\\"" + proto + "\\\",\\\"hex\\\":\\\"" + String(hex) + "\\\",\\\"bits\\\":" + String(results.bits) + "}";
+      pRxCharacteristic->setValue(ble.c_str());
+      pRxCharacteristic->notify();
+    }
+    ledFeedback(2, 80);
+    irrecv.resume();
+  }
 }
 `;
 }
+
 

@@ -1,1 +1,11 @@
 @import "tailwindcss";
+
+@theme {
+  --spacing-safe: env(safe-area-inset-top);
+}
+
+@layer base {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+}

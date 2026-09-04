@@ -181,14 +181,19 @@ export interface ESP32PinConfig {
 
 export interface ESP32DeviceState {
   connected: boolean;
-  connectionType: 'ble' | 'wifi' | 'offline';
+  connectionType: 'ble' | 'wifi' | 'both' | 'offline';
+  bleConnected: boolean;
+  wifiConnected: boolean;
   bleDeviceName: string;
   wifiSsid: string;
   wifiPassword?: string;
   ipAddress: string;
+  bleMac?: string;
+  wifiMac?: string;
   rssi: number; // e.g. -58 dBm
   uptimeSeconds: number;
   freeHeap: number; // bytes
+  isSyncing?: boolean;
   pinConfig: ESP32PinConfig;
   lastReceivedCommand?: {
     protocol: IRProtocol;

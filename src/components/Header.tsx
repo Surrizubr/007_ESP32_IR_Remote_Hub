@@ -97,7 +97,13 @@ export const Header: React.FC<HeaderProps> = ({
 
           <span className="text-[11px] font-bold">
             {espState.connected ? (
-              espState.connectionType === 'ble' ? (
+              espState.connectionType === 'both' ? (
+                <span className="flex items-center gap-1">
+                  <Bluetooth className="w-3 h-3 inline" />
+                  <Wifi className="w-3 h-3 inline" />
+                  {strings.common.hybridMode || 'Hybrid'}
+                </span>
+              ) : espState.connectionType === 'ble' ? (
                 <span className="flex items-center gap-1">
                   <Bluetooth className="w-3 h-3 inline" /> {strings.common.online}
                 </span>

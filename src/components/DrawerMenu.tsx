@@ -150,7 +150,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
       <div
         id="drawer-panel"
         onClick={(e) => e.stopPropagation()}
-        className={`w-full max-w-sm sm:max-w-md h-full flex flex-col shadow-2xl relative overflow-hidden transition-colors ${
+        className={`w-full max-w-sm sm:max-w-md h-full flex flex-col shadow-2xl relative overflow-hidden transition-colors pt-safe ${
           isLight
             ? 'bg-sky-50/95 border-l border-sky-200 text-slate-800'
             : 'bg-slate-900 border-l border-slate-800 text-slate-100'
@@ -464,7 +464,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         {/* ========================================================= */}
         {activeSubDrawer === 'themes' && (
           <div
-            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors ${
+            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors pt-safe ${
               isLight ? 'bg-sky-50/95 text-slate-800' : 'bg-slate-900 text-slate-100'
             }`}
           >
@@ -575,7 +575,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         {/* ========================================================= */}
         {activeSubDrawer === 'tools' && (
           <div
-            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors ${
+            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors pt-safe ${
               isLight ? 'bg-sky-50/95 text-slate-800' : 'bg-slate-900 text-slate-100'
             }`}
           >
@@ -897,7 +897,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         {/* ========================================================= */}
         {activeSubDrawer === 'feedback' && (
           <div
-            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors ${
+            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors pt-safe ${
               isLight ? 'bg-sky-50/95 text-slate-800' : 'bg-slate-900 text-slate-100'
             }`}
           >
@@ -1047,7 +1047,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         {/* ========================================================= */}
         {activeSubDrawer === 'languages' && (
           <div
-            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors ${
+            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors pt-safe ${
               isLight ? 'bg-sky-50/95 text-slate-800' : 'bg-slate-900 text-slate-100'
             }`}
           >
@@ -1142,7 +1142,7 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
         {activeSubDrawer === 'sync' && (
           <div
             id="subdrawer-sync"
-            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors ${
+            className={`absolute inset-0 z-20 flex flex-col animate-in slide-in-from-right duration-250 transition-colors pt-safe ${
               isLight ? 'bg-sky-50/95 text-slate-800' : 'bg-slate-900 text-slate-100'
             }`}
           >

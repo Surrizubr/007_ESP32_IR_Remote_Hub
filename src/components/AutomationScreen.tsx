@@ -545,6 +545,50 @@ export const AutomationScreen: React.FC<AutomationScreenProps> = ({
     }, 1200);
   };
 
+  const MacroProgressIndicator = ({ rule, currentStep, isRunning }: { rule: AutomationRule, currentStep: number, isRunning: boolean }) => {
+    if (!isRunning) return null;
+
+    const totalSteps = rule.actions.length + 1; // 1 (trigger) + action steps
+    const progress = (currentStep / totalSteps) * 100;
+
+    return (
+      <div className={`mt-3 p-3 rounded-2xl border animate-in slide-in-from-top-2 duration-300 ${
+        isLight ? 'bg-sky-50 border-sky-200 shadow-sm' : 'bg-blue-950/30 border-blue-800/50'
+      }`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-sky-500 animate-pulse" />
+            <span className={`text-[11px] font-bold uppercase tracking-wider ${isLight ? 'text-sky-900' : 'text-sky-300'}`}>
+              {strings.automation.macroExecuting}
+            </span>
+          </div>
+          <span className={`text-[10px] font-mono font-bold ${isLight ? 'text-sky-700' : 'text-sky-400'}`}>
+            {currentStep}/{totalSteps}
+          </span>
+        </div>
+
+        <div className={`w-full h-2 rounded-full overflow-hidden ${isLight ? 'bg-sky-200' : 'bg-slate-800'}`}>
+          <div
+            className="h-full bg-gradient-to-r from-sky-400 to-blue-600 transition-all duration-500 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+
+        <div className="mt-2 flex items-center justify-between text-[10px]">
+          <span className={`${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+            {currentStep === 1 ? 'Capturando Gatilho...' : `Transmitindo Passo ${currentStep - 1}...`}
+          </span>
+          {currentStep === totalSteps && (
+             <span className="text-emerald-500 font-bold flex items-center gap-1">
+               <Check className="w-3 h-3" />
+               {strings.automation.macroSuccess}
+             </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div id="automation-screen" className="flex flex-col pb-24 px-3 pt-2 max-w-md mx-auto space-y-4">
       {/* Header card */}
@@ -1571,6 +1615,13 @@ export const AutomationScreen: React.FC<AutomationScreenProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* Macro Progress Indicator */}
+              <MacroProgressIndicator
+                rule={rule}
+                currentStep={executionStep}
+                isRunning={isRunning}
+              />
             </div>
           );
         })}
