@@ -190,7 +190,9 @@ export interface ESP32DeviceState {
   ipAddress: string;
   bleMac?: string;
   wifiMac?: string;
-  rssi: number; // e.g. -58 dBm
+  rssi: number; // General or last updated RSSI
+  wifiRssi?: number;
+  bleRssi?: number;
   uptimeSeconds: number;
   freeHeap: number; // bytes
   isSyncing?: boolean;

@@ -137,7 +137,10 @@ class ESP32Service {
             const data = await res.json();
             if (data.uptime) this.state.uptimeSeconds = data.uptime;
             if (data.freeHeap) this.state.freeHeap = data.freeHeap;
-            if (data.rssi) this.state.rssi = data.rssi;
+            if (data.rssi) {
+              this.state.rssi = data.rssi;
+              this.state.wifiRssi = data.rssi;
+            }
             if (data.wifi_mac) this.state.wifiMac = data.wifi_mac;
             if (data.ble_mac) this.state.bleMac = data.ble_mac;
             this.state.wifiConnected = true;
@@ -755,14 +758,12 @@ class ESP32Service {
     // 2. Try HTTP as fallback or primary if BLE not available (or if BLE failed)
     if (!success && this.state.ipAddress) {
       try {
+        const formData = new URLSearchParams();
+        formData.append('plain', payload);
+
         const res = await fetch(`http://${this.state.ipAddress}/api/ir/send`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            protocol: command.protocol,
-            hex: command.hexCode,
-            bits: command.bits,
-          }),
+          body: formData,
           signal: AbortSignal.timeout(2500),
         });
         if (res.ok) {
