@@ -557,10 +557,12 @@ class ESP32Service {
     const targetIps = [this.state.ipAddress, '192.168.4.1'].filter(Boolean) as string[];
     for (const ip of targetIps) {
       try {
+        const formData = new URLSearchParams();
+        formData.append('plain', JSON.stringify({ ssid, password: pass }));
+
         const res = await fetch(`http://${ip}/api/wifi/config`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ssid, password: pass }),
+          body: formData,
           signal: AbortSignal.timeout(4000),
         });
         if (res.ok) {
@@ -810,10 +812,12 @@ class ESP32Service {
 
     if (this.state.ipAddress) {
       try {
+        const formData = new URLSearchParams();
+        formData.append('plain', JSON.stringify(this.state.pinConfig));
+
         await fetch(`http://${this.state.ipAddress}/api/pins/config`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.state.pinConfig),
+          body: formData,
           signal: AbortSignal.timeout(1500),
         });
       } catch {
@@ -954,17 +958,8 @@ export const esp32 = new ESP32Service();
 export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
   return `/*
  * ==========================================================
- * ESP32 IR Controller & Smart Remote Gateway Firmware v4.3
- * Totalmente compatível com o App Web / Mobile
- * ==========================================================
- * Bibliotecas Necessárias:
- *  1. "IRremoteESP8266" (versão 2.8.6 ou superior)
- * 
- * Pinos Configuráveis:
- *  - RX: GPIO ${pinConfig.irReceiverPin}
- *  - TX: GPIO ${pinConfig.irTransmitterPin}
- *  - LED Status: GPIO ${pinConfig.statusLedPin}
- *  - Buzzer: GPIO ${pinConfig.buzzerPin}
+ * ESP32 IR Controller & Smart Remote Gateway Firmware v4.8.1
+ * Totalmente compatível com o App Web / Mobile (WiFi + BLE)
  * ==========================================================
  */
 
@@ -979,35 +974,27 @@ export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
 #include <IRsend.h>
 #include <IRutils.h>
 
-// Inclusão de protocolos específicos para aumentar compatibilidade e tamanho do firmware
+// Protocolos específicos para Ar Condicionado e Dispositivos Complexos
 #include <ir_Mitsubishi.h>
 #include <ir_Daikin.h>
 #include <ir_Gree.h>
 #include <ir_Samsung.h>
 #include <ir_LG.h>
-#include <ir_Panasonic.h>
-#include <ir_Toshiba.h>
 
 // Definição de Pinos GPIO
-const uint16_t PIN_IR_RECV = ${pinConfig.irReceiverPin};
-const uint16_t PIN_IR_SEND = ${pinConfig.irTransmitterPin};
-const uint16_t PIN_STATUS_LED = ${pinConfig.statusLedPin};
-const uint16_t PIN_BUZZER = ${pinConfig.buzzerPin};
+uint16_t PIN_IR_RECV = ${pinConfig.irReceiverPin};
+uint16_t PIN_IR_SEND = ${pinConfig.irTransmitterPin};
+uint16_t PIN_STATUS_LED = ${pinConfig.statusLedPin};
+uint16_t PIN_BUZZER = ${pinConfig.buzzerPin};
 
-// Instâncias de Infravermelho
+// Instâncias IR
 IRrecv irrecv(PIN_IR_RECV, 1024, 50, true);
 IRsend irsend(PIN_IR_SEND);
 decode_results results;
 
-// Instâncias para ACs
-IRMitsubishiAC mirAC(PIN_IR_SEND);
-IRDaikinESP daikinAC(PIN_IR_SEND);
-IRGreeAC greeAC(PIN_IR_SEND);
-
-// Servidor Web HTTP
 WebServer server(80);
 
-// UUIDs do Serviço BLE (Sincronizados com o App)
+// UUIDs BLE
 #define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHAR_IR_TX_UUID        "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define CHAR_IR_RX_UUID        "beb5483f-36e1-4688-b7f5-ea07361b26a8"
@@ -1015,21 +1002,16 @@ WebServer server(80);
 #define CHAR_WIFI_UUID         "beb54841-36e1-4688-b7f5-ea07361b26a8"
 
 BLEServer* pServer = NULL;
-BLECharacteristic* pTxCharacteristic = NULL;
-BLECharacteristic* pRxCharacteristic = NULL;
-BLECharacteristic* pConfigCharacteristic = NULL;
-BLECharacteristic* pWifiCharacteristic = NULL;
+BLECharacteristic* pRxChar = NULL;
+BLECharacteristic* pWifiChar = NULL;
 bool deviceConnected = false;
 
-// Variáveis de Controle
-unsigned long lastStatusBlink = 0;
-unsigned long irActionTimeout = 0;
-bool ledStatusState = false;
+// Controle de Estado
+unsigned long lastBlink = 0;
 String pendingSsid = "";
 String pendingPass = "";
-bool bleWifiConnectPending = false;
-bool bleWifiScanPending = false;
-bool isScanningWifi = false;
+bool shouldConnectWifi = false;
+bool shouldScanWifi = false;
 
 struct CapturedSignal {
   bool hasNew = false;
@@ -1037,161 +1019,163 @@ struct CapturedSignal {
   String hexCode;
   uint16_t bits;
   uint16_t rawData[200];
-  uint16_t rawCount;
+  uint16_t rawLen = 0;
 } lastCaptured;
 
-// ==========================================================
-// UTILITÁRIOS
-// ==========================================================
-
-void ledFeedback(int pulses, int durationMs) {
-  irActionTimeout = millis() + (pulses * durationMs * 2);
-  for(int i=0; i<pulses; i++) {
-    digitalWrite(PIN_STATUS_LED, HIGH); delay(durationMs);
-    digitalWrite(PIN_STATUS_LED, LOW); delay(durationMs);
+// --- Helpers ---
+void ledFeedback(int p, int d) {
+  for(int i=0; i<p; i++) {
+    digitalWrite(PIN_STATUS_LED, HIGH);
+    if(PIN_BUZZER > 0) tone(PIN_BUZZER, 2800, 30);
+    delay(d);
+    digitalWrite(PIN_STATUS_LED, LOW);
+    delay(d);
   }
 }
 
-String extractJsonValue(String json, String key) {
-  int keyIndex = json.indexOf("\\"" + key + "\\"");
-  if (keyIndex == -1) return "";
-  int colonIndex = json.indexOf(":", keyIndex);
-  if (colonIndex == -1) return "";
-  int startQuote = json.indexOf("\\"", colonIndex);
-  if (startQuote != -1 && startQuote < colonIndex + 4) {
-    int endQuote = json.indexOf("\\"", startQuote + 1);
-    if (endQuote != -1) return json.substring(startQuote + 1, endQuote);
-  } else {
-    int start = colonIndex + 1;
-    while (start < json.length() && (json[start] == ' ' || json[start] == '\\t')) start++;
-    int end = start;
-    while (end < json.length() && (isDigit(json[end]) || json[end] == 'x' || json[end] == 'X' || isHexadecimalDigit(json[end]))) end++;
-    return json.substring(start, end);
+String getJsonVal(String json, String key) {
+  int kIdx = json.indexOf("\\"" + key + "\\"");
+  if (kIdx == -1) return "";
+  int cIdx = json.indexOf(":", kIdx);
+  int sQ = json.indexOf("\\"", cIdx);
+  if (sQ != -1 && sQ < cIdx + 5) {
+    return json.substring(sQ + 1, json.indexOf("\\"", sQ + 1));
   }
-  return "";
+  int start = cIdx + 1;
+  while (start < json.length() && (json[start] == ' ' || json[start] == '\\t')) start++;
+  int end = start;
+  while (end < json.length() && (isDigit(json[end]) || json[end] == '-' || json[end] == '.')) end++;
+  return json.substring(start, end);
 }
 
-// ==========================================================
-// TRANSMISSÃO IR
-// ==========================================================
-bool sendIRCommand(String protocol, uint64_t hexVal, uint16_t bits) {
-  protocol.toUpperCase();
-  ledFeedback(3, 60);
-  if (PIN_BUZZER > 0) tone(PIN_BUZZER, 2400, 40);
+// --- IR Logic ---
+void broadcastIR(String p, uint64_t h, int b, uint16_t* raw = NULL, uint16_t len = 0) {
+  p.toUpperCase();
+  Serial.printf("TX: %s | 0x%llX\\n", p.c_str(), h);
+  ledFeedback(2, 40);
 
-  Serial.printf("[IR TX] %s | 0x%llX | %d bits\\n", protocol.c_str(), hexVal, bits);
-
-  if (protocol == "NEC") irsend.sendNEC(hexVal, bits ? bits : 32);
-  else if (protocol == "SONY") irsend.sendSony(hexVal, bits ? bits : 12);
-  else if (protocol == "SAMSUNG") irsend.sendSAMSUNG(hexVal, bits ? bits : 32);
-  else if (protocol == "LG") irsend.sendLG(hexVal, bits ? bits : 28);
-  else if (protocol == "PANASONIC") irsend.sendPanasonic64(hexVal, bits ? bits : 48);
-  else if (protocol == "RC5") irsend.sendRC5(hexVal, bits ? bits : 12);
-  else if (protocol == "RC6") irsend.sendRC6(hexVal, bits ? bits : 20);
-  else if (protocol == "COOLIX") irsend.sendCOOLIX(hexVal, bits ? bits : 24);
-  else if (protocol == "DENON") irsend.sendDenon(hexVal, bits ? bits : 15);
-  else if (protocol == "MITSUBISHI") mirAC.send(hexVal);
-  else if (protocol == "DAIKIN") daikinAC.send(hexVal);
-  else if (protocol == "GREE") greeAC.send(hexVal);
-  else {
-    irsend.sendNEC(hexVal, bits ? bits : 32);
+  if (p == "NEC") irsend.sendNEC(h, b);
+  else if (p == "SONY") irsend.sendSony(h, b);
+  else if (p == "SAMSUNG") irsend.sendSAMSUNG(h, b);
+  else if (p == "LG") irsend.sendLG(h, b);
+  else if (p == "RAW" && raw != NULL && len > 0) {
+    irsend.sendRaw(raw, len, 38);
   }
+  else irsend.sendNEC(h, b);
 
   if (deviceConnected) {
-    String feedback = "{\\\"type\\\":\\\"feedback\\\",\\\"status\\\":\\\"ok\\\"}";
-    pRxCharacteristic->setValue(feedback.c_str());
-    pRxCharacteristic->notify();
+    pRxChar->setValue("{\\\"status\\\":\\\"sent\\\"}");
+    pRxChar->notify();
   }
-  return true;
 }
 
-// ==========================================================
-// HANDLERS HTTP
-// ==========================================================
-void sendCorsHeaders() {
+// --- HTTP Handlers ---
+void sendCORS() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-void handleOptions() { sendCorsHeaders(); server.send(204); }
-
 void handleStatus() {
-  sendCorsHeaders();
+  sendCORS();
   String ip = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : WiFi.softAPIP().toString();
-  String wifiMac = WiFi.macAddress();
-  String bleMac = WiFi.macAddress(); // Geralmente o mesmo ou +1 no ESP32
-
-  String json = "{\\\"status\\\":\\\"online\\\",\\\"ip\\\":\\\"" + ip + "\\\",\\\"wifi_mac\\\":\\\"" + wifiMac + "\\\",\\\"ble_mac\\\":\\\"" + bleMac + "\\\",\\\"uptime\\\":" + String(millis() / 1000) + "}";
+  String macW = WiFi.macAddress();
+  String macB = BLEDevice::getAddress().toString().c_str();
+  String json = "{\\\"status\\\":\\\"online\\\",\\\"ip\\\":\\\""+ip+"\\\",\\\"uptime\\\":"+String(millis()/1000)+",\\\"freeHeap\\\":"+String(ESP.getFreeHeap())+",\\\"wifi_mac\\\":\\\""+macW+"\\\",\\\"ble_mac\\\":\\\""+macB+"\\\",\\\"rssi\\\":"+String(WiFi.RSSI())+"}";
   server.send(200, "application/json", json);
 }
 
-void handleSendIR() {
-  sendCorsHeaders();
+void handlePins() {
+  sendCORS();
   if (server.hasArg("plain")) {
     String body = server.arg("plain");
-    sendIRCommand(extractJsonValue(body, "protocol"),
-                  strtoull(extractJsonValue(body, "hex").c_str(), NULL, 16),
-                  extractJsonValue(body, "bits").toInt());
-    server.send(200, "application/json", "{\\\"status\\\":\\\"ok\\\"}");
+    PIN_IR_RECV = getJsonVal(body, "irReceiverPin").toInt();
+    PIN_IR_SEND = getJsonVal(body, "irTransmitterPin").toInt();
+    PIN_STATUS_LED = getJsonVal(body, "statusLedPin").toInt();
+    PIN_BUZZER = getJsonVal(body, "buzzerPin").toInt();
+
+    pinMode(PIN_STATUS_LED, OUTPUT);
+    irrecv.pause();
+    irrecv = IRrecv(PIN_IR_RECV, 1024, 50, true);
+    irrecv.enableIRIn();
+    irsend = IRsend(PIN_IR_SEND);
+    irsend.begin();
+
+    ledFeedback(3, 100);
+    server.send(200, "application/json", "{\\\"success\\\":true}");
   }
 }
 
-// ==========================================================
-// CALLBACKS BLE
-// ==========================================================
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      deviceConnected = true;
-      ledFeedback(2, 100);
+void handleWifiScan() {
+  sendCORS();
+  int n = WiFi.scanNetworks();
+  String json = "[";
+  for (int i=0; i<n; i++) {
+    json += "{\\\"ssid\\\":\\\""+WiFi.SSID(i)+"\\\",\\\"rssi\\\":"+String(WiFi.RSSI(i))+",\\\"secured\\\":"+String(WiFi.encryptionType(i)!=WIFI_AUTH_OPEN?"true":"false")+"}";
+    if(i<n-1) json += ",";
+  }
+  json += "]";
+  server.send(200, "application/json", json);
+}
+
+void handleWifiConfig() {
+  sendCORS();
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    pendingSsid = getJsonVal(body, "ssid");
+    pendingPass = getJsonVal(body, "password");
+    shouldConnectWifi = true;
+    server.send(200, "application/json", "{\\\"success\\\":true,\\\"message\\\":\\\"Credenciais recebidas, conectando...\\\"}");
+  } else {
+    server.send(400, "application/json", "{\\\"success\\\":false,\\\"message\\\":\\\"Dados ausentes\\\"}");
+  }
+}
+
+void handleReceive() {
+  sendCORS();
+  if (lastCaptured.hasNew) {
+    String json = "{\\\"hasNew\\\":true,\\\"protocol\\\":\\\""+lastCaptured.protocol+"\\\",\\\"hex\\\":\\\""+lastCaptured.hexCode+"\\\",\\\"bits\\\":"+String(lastCaptured.bits)+",\\\"rawTimings\\\":[";
+    for(int i=0; i<lastCaptured.rawLen; i++) {
+      json += String(lastCaptured.rawData[i]);
+      if(i<lastCaptured.rawLen-1) json += ",";
     }
-    void onDisconnect(BLEServer* pServer) {
-      deviceConnected = false;
-      pServer->getAdvertising()->start();
-    }
+    json += "]}";
+    server.send(200, "application/json", json);
+    lastCaptured.hasNew = false;
+  } else {
+    server.send(200, "application/json", "{\\\"hasNew\\\":false}");
+  }
+}
+
+// --- BLE Callbacks ---
+class BLECallback: public BLEServerCallbacks {
+  void onConnect(BLEServer* s) { deviceConnected = true; ledFeedback(1, 200); }
+  void onDisconnect(BLEServer* s) { deviceConnected = false; BLEDevice::startAdvertising(); }
 };
 
-class IRTxCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      // Feedback visual imediato para comandos IR
-      ledFeedback(1, 50);
-
-      String val = pCharacteristic->getValue().c_str();
-      sendIRCommand(extractJsonValue(val, "protocol"),
-                    strtoull(extractJsonValue(val, "hex").c_str(), NULL, 16),
-                    extractJsonValue(val, "bits").toInt());
-    }
+class IRTxCallback: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) {
+    String v = c->getValue().c_str();
+    broadcastIR(getJsonVal(v, "protocol"), strtoull(getJsonVal(v, "hex").c_str(), NULL, 16), getJsonVal(v, "bits").toInt());
+  }
 };
 
-class WifiCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      // Feedback LED para indicar que recebeu dados de WIFI via BLE
-      ledFeedback(1, 100);
-
-      String val = pCharacteristic->getValue().c_str();
-      String action = extractJsonValue(val, "action");
-      if (action == "scan") bleWifiScanPending = true;
-      else {
-        pendingSsid = extractJsonValue(val, "ssid");
-        pendingPass = extractJsonValue(val, "password");
-        if (pendingSsid.length() > 0) bleWifiConnectPending = true;
-      }
+class WifiCallback: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) {
+    String v = c->getValue().c_str();
+    String a = getJsonVal(v, "action");
+    if (a == "scan") shouldScanWifi = true;
+    else if (a == "connect") {
+      pendingSsid = getJsonVal(v, "ssid");
+      pendingPass = getJsonVal(v, "password");
+      shouldConnectWifi = true;
     }
-};
-
-class ConfigCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      ledFeedback(1, 50);
-      // Espaço para futuras configurações de Pinos via BLE
-    }
+  }
 };
 
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_STATUS_LED, OUTPUT);
-  if (PIN_BUZZER > 0) pinMode(PIN_BUZZER, OUTPUT);
-
-  digitalWrite(PIN_STATUS_LED, HIGH);
   irrecv.enableIRIn();
   irsend.begin();
 
@@ -1199,133 +1183,91 @@ void setup() {
   WiFi.softAP("ESP32_IR_HUB_AP", "12345678");
 
   server.on("/api/status", HTTP_GET, handleStatus);
-  server.on("/api/status", HTTP_OPTIONS, handleOptions);
-  server.on("/api/ir/send", HTTP_POST, handleSendIR);
-  server.on("/api/ir/send", HTTP_OPTIONS, handleOptions);
-  server.on("/api/wifi/scan", HTTP_GET, [](){
-    WiFi.scanNetworks();
-    server.send(200, "application/json", "[]"); // Simplificado
+  server.on("/api/pins/config", HTTP_POST, handlePins);
+  server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
+  server.on("/api/wifi/config", HTTP_POST, handleWifiConfig);
+  server.on("/api/ir/send", HTTP_POST, [](){
+    sendCORS();
+    String body = server.arg("plain");
+    broadcastIR(getJsonVal(body, "protocol"), strtoull(getJsonVal(body, "hex").c_str(), NULL, 16), getJsonVal(body, "bits").toInt());
+    server.send(200, "application/json", "{\\\"status\\\":\\\"ok\\\"}");
   });
+  server.onNotFound([](){ if(server.method()==HTTP_OPTIONS){ sendCORS(); server.send(204); } });
   server.begin();
 
   BLEDevice::init("ESP32_IR_HUB");
-  BLEDevice::setMTU(512);
   pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  pServer->setCallbacks(new BLECallback());
+  BLEService *pS = pServer->createService(SERVICE_UUID);
 
-  BLEService *pServ = pServer->createService(SERVICE_UUID);
+  BLECharacteristic *pTx = pS->createCharacteristic(CHAR_IR_TX_UUID, BLECharacteristic::PROPERTY_WRITE);
+  pTx->setCallbacks(new IRTxCallback());
 
-  // Característica de Transmissão IR
-  pTxCharacteristic = pServ->createCharacteristic(
-    CHAR_IR_TX_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
-  );
-  pTxCharacteristic->setCallbacks(new IRTxCallbacks());
+  pRxChar = pS->createCharacteristic(CHAR_IR_RX_UUID, BLECharacteristic::PROPERTY_NOTIFY);
+  pRxChar->addDescriptor(new BLE2902());
 
-  // Característica de Recepção IR (Notificações)
-  pRxCharacteristic = pServ->createCharacteristic(
-    CHAR_IR_RX_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pRxCharacteristic->addDescriptor(new BLE2902());
+  pWifiChar = pS->createCharacteristic(CHAR_WIFI_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+  pWifiChar->setCallbacks(new WifiCallback());
+  pWifiChar->addDescriptor(new BLE2902());
 
-  // Característica de Configuração
-  pConfigCharacteristic = pServ->createCharacteristic(
-    CHAR_CONFIG_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR
-  );
-  pConfigCharacteristic->setCallbacks(new ConfigCallbacks());
-
-  // Característica de WiFi (Com WRITE_NR para maior compatibilidade)
-  pWifiCharacteristic = pServ->createCharacteristic(
-    CHAR_WIFI_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR | BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
-  );
-  pWifiCharacteristic->addDescriptor(new BLE2902());
-  pWifiCharacteristic->setCallbacks(new WifiCallbacks());
-
-  pServ->start();
-
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
+  pS->start();
   BLEDevice::startAdvertising();
-
-  digitalWrite(PIN_STATUS_LED, LOW);
-  Serial.println("Pronto!");
+  Serial.println("ESP32 Ready!");
 }
 
 void loop() {
   server.handleClient();
-  unsigned long currentMillis = millis();
 
-  // Blink de status (se BLE conectado)
-  if (currentMillis > irActionTimeout && deviceConnected) {
-    if (currentMillis - lastStatusBlink > 1500) {
-      lastStatusBlink = currentMillis;
-      ledStatusState = !ledStatusState;
-      digitalWrite(PIN_STATUS_LED, ledStatusState ? HIGH : LOW);
-    }
-  }
-
-  if (bleWifiScanPending) {
-    bleWifiScanPending = false;
+  if (shouldScanWifi) {
+    shouldScanWifi = false;
     int n = WiFi.scanNetworks();
-    for (int i = 0; i < n; i++) {
-      String net = "{\\\"type\\\":\\\"wifi_net\\\",\\\"ssid\\\":\\\"" + WiFi.SSID(i) + "\\\",\\\"rssi\\\":" + String(WiFi.RSSI(i)) + "}";
-      pWifiCharacteristic->setValue(net.c_str());
-      pWifiCharacteristic->notify();
-      delay(20);
+    for (int i=0; i<n; i++) {
+      String net = "{\\\"type\\\":\\\"wifi_net\\\",\\\"ssid\\\":\\\""+WiFi.SSID(i)+"\\\",\\\"rssi\\\":"+String(WiFi.RSSI(i))+"}";
+      pWifiChar->setValue(net.c_str());
+      pWifiChar->notify();
+      delay(50);
     }
-    pWifiCharacteristic->setValue("{\\\"type\\\":\\\"wifi_done\\\"}");
-    pWifiCharacteristic->notify();
+    pWifiChar->setValue("{\\\"type\\\":\\\"wifi_done\\\"}");
+    pWifiChar->notify();
   }
 
-  if (bleWifiConnectPending) {
-    bleWifiConnectPending = false;
-    Serial.println("Tentando conectar WiFi: " + pendingSsid);
-    WiFi.disconnect();
+  if (shouldConnectWifi) {
+    shouldConnectWifi = false;
     WiFi.begin(pendingSsid.c_str(), pendingPass.c_str());
-
-    // Pequeno delay para permitir o início da conexão
-    delay(100);
-  }
-
-  // Verifica mudança de estado do WiFi para notificar o App
-  static wl_status_t lastWifiStatus = WL_IDLE_STATUS;
-  wl_status_t currentWifiStatus = WiFi.status();
-  if (currentWifiStatus != lastWifiStatus) {
-    lastWifiStatus = currentWifiStatus;
-    if (currentWifiStatus == WL_CONNECTED) {
-      String ip = WiFi.localIP().toString();
-      String wifiMac = WiFi.macAddress();
-      String bleMac = WiFi.macAddress();
-      Serial.println("WiFi Conectado! IP: " + ip);
-
-      if (deviceConnected) {
-        String msg = "{\\\"ip\\\":\\\"" + ip + "\\\",\\\"wifi_mac\\\":\\\"" + wifiMac + "\\\",\\\"ble_mac\\\":\\\"" + bleMac + "\\\",\\\"status\\\":\\\"connected\\\"}";
-        pWifiCharacteristic->setValue(msg.c_str());
-        pWifiCharacteristic->notify();
-      }
-    }
   }
 
   if (irrecv.decode(&results)) {
-    String proto = typeToString(results.decode_type);
-    char hex[20]; sprintf(hex, "0x%llX", results.value);
+    String p = typeToString(results.decode_type);
+    char h[20]; sprintf(h, "0x%llX", results.value);
+
+    lastCaptured.protocol = p;
+    lastCaptured.hexCode = String(h);
+    lastCaptured.bits = results.bits;
+    lastCaptured.rawLen = results.rawlen - 1;
+    if (lastCaptured.rawLen > 200) lastCaptured.rawLen = 200;
+
+    for (int i = 1; i < results.rawlen; i++) {
+      lastCaptured.rawData[i-1] = results.rawbuf[i] * kRawTick;
+    }
+    lastCaptured.hasNew = true;
 
     if (deviceConnected) {
-      String ble = "{\\\"protocol\\\":\\\"" + proto + "\\\",\\\"hex\\\":\\\"" + String(hex) + "\\\",\\\"bits\\\":" + String(results.bits) + "}";
-      pRxCharacteristic->setValue(ble.c_str());
-      pRxCharacteristic->notify();
+      String ble = "{\\\"protocol\\\":\\\""+p+"\\\",\\\"hex\\\":\\\""+String(h)+"\\\",\\\"bits\\\":"+String(results.bits)+"}";
+      pRxChar->setValue(ble.c_str());
+      pRxChar->notify();
     }
-    ledFeedback(2, 80);
+
+    ledFeedback(1, 60);
     irrecv.resume();
   }
+
+  if (deviceConnected && millis() - lastBlink > 2000) {
+    lastBlink = millis();
+    digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+    delay(20);
+    digitalWrite(PIN_STATUS_LED, !digitalRead(PIN_STATUS_LED));
+  }
+  yield();
 }
 `;
 }
-
-
