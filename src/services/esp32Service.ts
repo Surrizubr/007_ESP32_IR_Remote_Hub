@@ -474,19 +474,27 @@ class ESP32Service {
           return;
         }
 
-        // Wi-Fi association response
-        if (parsed.ip) {
-          this.state.ipAddress = parsed.ip;
+        // Wi-Fi association response or status push
+        if (parsed.ip || parsed.status === 'connected') {
+          this.state.ipAddress = parsed.ip || this.state.ipAddress;
           if (parsed.wifi_mac) this.state.wifiMac = parsed.wifi_mac;
           if (parsed.ble_mac) this.state.bleMac = parsed.ble_mac;
-          this.state.wifiConnected = true;
-          this.addLog('success', `IP Recebido via BLE: ${parsed.ip}`);
-          this.persistState();
-          this.notify();
+          if (parsed.rssi !== undefined) {
+            this.state.rssi = parsed.rssi;
+            this.state.wifiRssi = parsed.rssi;
+          }
+          this.state.wifiConnected = (parsed.status === 'connected' || !!parsed.ip);
 
-          // Tenta validar a conexÃ£o HTTP imediatamente
-          this.testWiFiConnection(parsed.ip);
+          if (parsed.ip) {
+            this.addLog('success', `IP Recebido via BLE: ${parsed.ip}`);
+            this.persistState();
+            // Tenta validar a conexão HTTP imediatamente
+            this.testWiFiConnection(parsed.ip);
+          }
+
+          this.notify();
         }
+
         if (this.wifiConnectResolver) {
           this.wifiConnectResolver({
             success: parsed.status === 'connected' || Boolean(parsed.ip),
