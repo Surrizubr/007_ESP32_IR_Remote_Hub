@@ -252,6 +252,7 @@ export interface ServiceLog {
 export interface ESP32DeviceState {
   connected: boolean;
   connectionType: 'ble' | 'wifi' | 'both' | 'offline';
+  connectionMode: 'ble' | 'wifi';
   bleConnected: boolean;
   wifiConnected: boolean;
   bleDeviceName: string;

@@ -62,12 +62,19 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   const [isEditingIp, setIsEditingIp] = useState<boolean>(false);
   const [customIp, setCustomIp] = useState<string>(espState.ipAddress || '');
 
+  // State for mode toggle: 'ble' or 'wifi'
+  const [activeMode, setActiveMode] = useState<'ble' | 'wifi'>(espState.connectionMode || 'ble');
+
   // Update fields when espState changes (e.g. IP discovered via BLE)
   useEffect(() => {
     if (espState.ipAddress && espState.ipAddress !== customIp) {
       setCustomIp(espState.ipAddress);
     }
   }, [espState.ipAddress]);
+
+  useEffect(() => {
+    if (espState.connectionMode) setActiveMode(espState.connectionMode);
+  }, [espState.connectionMode]);
 
   useEffect(() => {
     if (espState.wifiSsid && !ssid) setSsid(espState.wifiSsid);
@@ -235,8 +242,29 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                   {espState.connected ? strings.sync.connectedOnline : strings.sync.disconnected}
                 </div>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <p className={`text-[11px] font-bold opacity-40 font-mono tracking-widest`}>FIRMWARE V4.8.5 PRO</p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className={`text-[11px] font-bold opacity-40 font-mono tracking-widest`}>FIRMWARE V6.1.0</p>
+                <div className={`relative flex items-center p-1 rounded-xl ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
+                  <div
+                    className={`absolute h-6 w-[45px] rounded-lg transition-all duration-300 ease-out shadow-sm ${
+                      activeMode === 'ble'
+                        ? 'translate-x-0 bg-sky-500'
+                        : 'translate-x-[45px] bg-emerald-500'
+                    }`}
+                  />
+                  <button
+                    onClick={() => { feedback.playClick(); esp32.setConnectionMode('ble'); setActiveMode('ble'); }}
+                    className={`relative z-10 w-[45px] py-1 text-[9px] font-black uppercase transition-colors duration-300 ${activeMode === 'ble' ? 'text-white' : 'text-slate-500'}`}
+                  >
+                    BLE
+                  </button>
+                  <button
+                    onClick={() => { feedback.playClick(); esp32.setConnectionMode('wifi'); setActiveMode('wifi'); }}
+                    className={`relative z-10 w-[45px] py-1 text-[9px] font-black uppercase transition-colors duration-300 ${activeMode === 'wifi' ? 'text-white' : 'text-slate-500'}`}
+                  >
+                    WIFI
+                  </button>
+                </div>
                 {espState.isSyncing && (
                   <RefreshCw className="w-3 h-3 animate-spin text-sky-500 opacity-60" />
                 )}
@@ -246,120 +274,126 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
         </div>
 
         <div className="grid grid-cols-2 gap-4 mt-6">
-          {/* Box 1: WiFi Signal */}
-          <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
-            <div className={`text-[10px] font-black mb-2 flex items-center gap-1.5 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              <Wifi className={`w-3.5 h-3.5 ${isLight ? 'text-sky-500' : 'text-sky-400'}`} /> Sinal WiFi
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className={`text-4xl font-black font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>{espState.wifiRssi || espState.rssi || 0}</span>
-              <span className={`text-[10px] font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>dBm</span>
-            </div>
-          </div>
-
-          {/* Box 2: BLE Signal */}
-          <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
-            <div className={`text-[10px] font-black mb-2 flex items-center gap-1.5 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              <Bluetooth className={`w-3.5 h-3.5 ${isLight ? 'text-blue-500' : 'text-blue-400'}`} /> Sinal BLE
-            </div>
-            <div className="flex items-baseline gap-1">
-              <span className={`text-4xl font-black font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>{espState.bleConnected ? -45 : 0}</span>
-              <span className={`text-[10px] font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>dBm</span>
-            </div>
-          </div>
-
-          {/* Box 3: IP & MAC WiFi */}
-          <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
-            <div className={`text-[10px] font-black mb-2 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>IP & MAC WiFi</div>
-            <div className={`text-sm font-black font-mono truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              {espState.ipAddress || 'OFFLINE'}
-            </div>
-            <div className={`text-[10px] font-black font-mono mt-1 truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-              {espState.wifiMac || '00:00:00:00:00:00'}
-            </div>
-          </div>
-
-          {/* Box 4: MAC BLE */}
-          <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
-            <div className={`text-[10px] font-black mb-2 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>MAC BLE</div>
-            <div className={`text-sm font-black font-mono truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              {espState.bleMac || '00:00:00:00:00:00'}
-            </div>
-            <div className={`text-[10px] font-black font-mono mt-1 truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
-               {espState.bleDeviceName || 'ESP32_HUB'}
-            </div>
-          </div>
+          {activeMode === 'wifi' ? (
+            <>
+              {/* Box 1: WiFi Signal */}
+              <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
+                <div className={`text-[10px] font-black mb-2 flex items-center gap-1.5 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Wifi className={`w-3.5 h-3.5 ${isLight ? 'text-sky-500' : 'text-sky-400'}`} /> Sinal WiFi
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={`text-4xl font-black font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>{espState.wifiRssi || espState.rssi || 0}</span>
+                  <span className={`text-[10px] font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>dBm</span>
+                </div>
+              </div>
+              {/* Box 3: IP & MAC WiFi */}
+              <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
+                <div className={`text-[10px] font-black mb-2 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Endereço IP</div>
+                <div className={`text-sm font-black font-mono truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  {espState.ipAddress || 'OFFLINE'}
+                </div>
+                <div className={`text-[10px] font-black font-mono mt-1 truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {espState.wifiMac || '00:00:00:00:00:00'}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Box 2: BLE Signal */}
+              <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
+                <div className={`text-[10px] font-black mb-2 flex items-center gap-1.5 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  <Bluetooth className={`w-3.5 h-3.5 ${isLight ? 'text-blue-500' : 'text-blue-400'}`} /> Sinal BLE
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={`text-4xl font-black font-mono ${isLight ? 'text-slate-900' : 'text-white'}`}>{espState.bleConnected ? -45 : 0}</span>
+                  <span className={`text-[10px] font-bold ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>dBm</span>
+                </div>
+              </div>
+              {/* Box 4: MAC BLE */}
+              <div className={`p-4 rounded-2xl border shadow-sm transition-all ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
+                <div className={`text-[10px] font-black mb-2 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Identificador Hub</div>
+                <div className={`text-sm font-black font-mono truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                  {espState.bleDeviceName || 'ESP32_HUB'}
+                </div>
+                <div className={`text-[10px] font-black font-mono mt-1 truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                  {espState.bleMac || '00:00:00:00:00:00'}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* BLUETOOTH SECTION */}
-      <div className={`rounded-[32px] p-6 shadow-xl border transition-all ${isLight ? 'bg-gradient-to-b from-sky-100/90 via-white to-sky-50 border-sky-200/90 shadow-sky-200/60' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
-        <div className="flex items-center gap-4 mb-6">
-          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${isLight ? 'bg-sky-50 text-sky-600 border-sky-100' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'}`}>
-            <Bluetooth className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-black text-sm tracking-tight">{strings.sync.bleSectionTitle}</h3>
-            <p className="text-[11px] font-medium opacity-50">{strings.sync.bleSectionSubtitle}</p>
-          </div>
-        </div>
-
-        {(discoveredBleDevices.length > 0 || isScanningBle) && (
-          <div className={`mb-4 p-4 rounded-2xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-black border-slate-800'}`}>
-            <div className={`text-[10px] font-black text-center mb-3 animate-pulse uppercase tracking-widest ${isLight ? 'text-sky-700' : 'text-sky-400'}`}>
-              {strings.sync.bleMacHint}
+      {/* MODE SPECIFIC CONTENT */}
+      {activeMode === 'ble' ? (
+        /* BLUETOOTH SECTION */
+        <div className={`rounded-[32px] p-6 shadow-xl border transition-all animate-in fade-in slide-in-from-right-4 duration-300 ${isLight ? 'bg-gradient-to-b from-sky-100/90 via-white to-sky-50 border-sky-200/90 shadow-sky-200/60' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
+          <div className="flex items-center gap-4 mb-6">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${isLight ? 'bg-sky-50 text-sky-600 border-sky-100' : 'bg-sky-500/10 text-sky-400 border-sky-500/20'}`}>
+              <Bluetooth className="w-5 h-5" />
             </div>
-            <div className="space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-hide">
-              {discoveredBleDevices.map((device) => (
-                <button
-                  key={device.deviceId}
-                  onClick={() => handleConnectBLE(device.deviceId)}
-                  className={`w-full flex items-center justify-between p-4 rounded-xl text-xs font-bold transition-all border ${isLight ? 'bg-white border-slate-200 hover:border-sky-500' : 'bg-slate-900 border-slate-800 hover:border-sky-500'}`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <Bluetooth className="w-4 h-4 text-sky-500 shrink-0" />
-                    <span className="truncate">{device.name || 'ESP32_IR_HUB'}</span>
-                  </div>
-                  <span className="text-[10px] font-mono opacity-40 shrink-0 ml-2">{device.deviceId}</span>
-                </button>
-              ))}
+            <div>
+              <h3 className="font-black text-sm tracking-tight">{strings.sync.bleSectionTitle}</h3>
+              <p className="text-[11px] font-medium opacity-50">{strings.sync.bleSectionSubtitle}</p>
             </div>
           </div>
-        )}
 
-        <button
-          onClick={handleScanBLE}
-          disabled={isScanningBle}
-          className="w-full py-3 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all bg-sky-500 text-white uppercase tracking-widest mb-4 flex items-center justify-center gap-2"
-        >
-          <Bluetooth className={`w-3.5 h-3.5 ${isScanningBle ? 'animate-spin' : ''}`} />
-          <span>{isScanningBle ? strings.sync.bleScanning : "Conectar no Bluetooth"}</span>
-        </button>
+          {(discoveredBleDevices.length > 0 || isScanningBle) && (
+            <div className={`mb-4 p-4 rounded-2xl border ${isLight ? 'bg-slate-50 border-slate-100' : 'bg-black border-slate-800'}`}>
+              <div className={`text-[10px] font-black text-center mb-3 animate-pulse uppercase tracking-widest ${isLight ? 'text-sky-700' : 'text-sky-400'}`}>
+                {strings.sync.bleMacHint}
+              </div>
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-hide">
+                {discoveredBleDevices.map((device) => (
+                  <button
+                    key={device.deviceId}
+                    onClick={() => handleConnectBLE(device.deviceId)}
+                    className={`w-full flex items-center justify-between p-4 rounded-xl text-xs font-bold transition-all border ${isLight ? 'bg-white border-slate-200 hover:border-sky-500' : 'bg-slate-900 border-slate-800 hover:border-sky-500'}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Bluetooth className="w-4 h-4 text-sky-500 shrink-0" />
+                      <span className="truncate">{device.name || 'ESP32_IR_HUB'}</span>
+                    </div>
+                    <span className="text-[10px] font-mono opacity-40 shrink-0 ml-2">{device.deviceId}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        {espState.bleConnected && (
           <button
-            onClick={handleDisconnectBLE}
-            className="w-full py-3 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all border border-rose-500/30 text-rose-500 bg-rose-500/5 uppercase tracking-widest flex items-center justify-center gap-2"
+            onClick={handleScanBLE}
+            disabled={isScanningBle}
+            className="w-full py-3 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all bg-sky-500 text-white uppercase tracking-widest mb-4 flex items-center justify-center gap-2"
           >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>{strings.sync.bleDisconnectBtn}</span>
+            <Bluetooth className={`w-3.5 h-3.5 ${isScanningBle ? 'animate-spin' : ''}`} />
+            <span>{isScanningBle ? strings.sync.bleScanning : "Conectar no Bluetooth"}</span>
           </button>
-        )}
-      </div>
 
-      {/* WIFI SECTION - HIGH CONTRAST INPUTS */}
-      <div className={`rounded-[32px] p-6 shadow-xl border transition-all ${isLight ? 'bg-gradient-to-b from-sky-100/90 via-white to-sky-50 border-sky-200/90 shadow-sky-200/60' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${isLight ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
-              <Wifi className="w-5 h-5" />
-            </div>
-            <h3 className="font-black text-sm tracking-tight">Configuração Wi-Fi</h3>
-          </div>
-          <button onClick={handleScanWiFi} disabled={isScanningWifi} className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${isLight ? 'bg-slate-50 border-slate-200 text-emerald-600' : 'bg-slate-900 border-slate-800 text-emerald-400'}`}>
-            <RefreshCw className={`w-4 h-4 ${isScanningWifi ? 'animate-spin' : ''}`} />
-          </button>
+          {espState.bleConnected && (
+            <button
+              onClick={handleDisconnectBLE}
+              className="w-full py-3 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all border border-rose-500/30 text-rose-500 bg-rose-500/5 uppercase tracking-widest flex items-center justify-center gap-2"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span>{strings.sync.bleDisconnectBtn}</span>
+            </button>
+          )}
         </div>
+      ) : (
+        /* WIFI SECTION - HIGH CONTRAST INPUTS */
+        <div className={`rounded-[32px] p-6 shadow-xl border transition-all animate-in fade-in slide-in-from-left-4 duration-300 ${isLight ? 'bg-gradient-to-b from-emerald-50/90 via-white to-emerald-50/30 border-emerald-200/90 shadow-emerald-200/40' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-4">
+              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${isLight ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
+                <Wifi className="w-5 h-5" />
+              </div>
+              <h3 className="font-black text-sm tracking-tight">Configuração Wi-Fi</h3>
+            </div>
+            <button onClick={handleScanWiFi} disabled={isScanningWifi} className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${isLight ? 'bg-slate-50 border-slate-200 text-emerald-600' : 'bg-slate-900 border-slate-800 text-emerald-400'}`}>
+              <RefreshCw className={`w-4 h-4 ${isScanningWifi ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
 
         {availableNetworks.length > 0 && (
           <div className={`mb-4 p-3 rounded-2xl border max-h-40 overflow-y-auto scrollbar-hide shadow-md ${isLight ? 'bg-white border-slate-400' : 'bg-slate-950 border-slate-800'}`}>
@@ -410,6 +444,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           </button>
         </div>
       </div>
+    )}
 
       {/* HARDWARE TOOLS - RESTORED PING, TX & RX */}
       <div className={`rounded-[32px] p-6 shadow-xl border transition-all ${isLight ? 'bg-gradient-to-b from-sky-100/90 via-white to-sky-50 border-sky-200/90 shadow-sky-200/60' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
