@@ -1238,6 +1238,7 @@ void sendCORS() {
   server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
   server.sendHeader("Connection", "keep-alive");
+  ledBlink(1, 15); // Feedback visual para toda comunicacao HTTP com o app
 }
 
 // â”€â”€â”€ IR Transmit Core â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1728,6 +1729,7 @@ class BLEServerCB : public BLEServerCallbacks {
 
 class IRTxCB : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
+    ledBlink(1, 15);
     String v = c->getValue().c_str();
     if (v.isEmpty()) return;
 
@@ -1758,6 +1760,7 @@ class IRTxCB : public BLECharacteristicCallbacks {
 
 class WifiCB : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
+    ledBlink(1, 15);
     String v = c->getValue().c_str();
     if (v.isEmpty()) return;
 
@@ -1766,7 +1769,7 @@ class WifiCB : public BLECharacteristicCallbacks {
 
     String action = doc["action"] | "";
     if (action == "scan") {
-      // Inicia scan assÃ­ncrono
+      // Inicia scan assíncrono
       WiFi.scanNetworks(true);
       wifiScanAsync = true;
     } else if (action == "connect") {
