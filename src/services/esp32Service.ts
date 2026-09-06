@@ -1366,16 +1366,16 @@ void executeIRCommand(const IRQueueItem& cmd) {
     } else { irsend.sendSamsungAC(cmd.state, kSamsungAcStateLength, cmd.repeat); }
   }
   else if (proto == "HITACHI_AC") {
-    irsend.sendHitachiAC(cmd.state, kHitachiAcStateLength, cmd.repeat);
+    irsend.sendHitachiAc(cmd.state, kHitachiAcStateLength, cmd.repeat);
   }
   else if (proto == "HITACHI_AC1") {
-    irsend.sendHitachiAC1(cmd.state, kHitachiAc1StateLength, cmd.repeat);
+    irsend.sendHitachiAc1(cmd.state, kHitachiAc1StateLength, cmd.repeat);
   }
   else if (proto == "HITACHI_AC2") {
-    irsend.sendHitachiAC2(cmd.state, kHitachiAc2StateLength, cmd.repeat);
+    irsend.sendHitachiAc2(cmd.state, kHitachiAc2StateLength, cmd.repeat);
   }
   else if (proto == "HITACHI_AC3") {
-    irsend.sendHitachiAC3(cmd.state, kHitachiAc3StateLength, cmd.repeat);
+    irsend.sendHitachiAc3(cmd.state, kHitachiAc3StateLength, cmd.repeat);
   }
   else if (proto == "HAIER_AC") {
     irsend.sendHaierAC(cmd.state, kHaierACStateLength, cmd.repeat);
