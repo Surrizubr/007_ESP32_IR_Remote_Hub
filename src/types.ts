@@ -1,21 +1,80 @@
 export type ScreenTab = 'home' | 'copy' | 'automation' | 'schedule' | 'devices' | 'history' | 'sync';
 
 export type IRProtocol =
+  // Universal / TV / Decoders / Audio
   | 'NEC'
+  | 'NEC2'
   | 'SONY'
   | 'RC5'
+  | 'RC5X'
   | 'RC6'
   | 'SAMSUNG'
+  | 'SAMSUNG36'
   | 'PANASONIC'
-  | 'COOLIX'
-  | 'MITSUBISHI'
-  | 'DAIKIN'
-  | 'GREE'
-  | 'FUJITSU'
-  | 'TCL'
-  | 'HITACHI'
+  | 'LG'
+  | 'LG2'
+  | 'SHARP'
   | 'DENON'
-  | 'RAW';
+  | 'JVC'
+  | 'PIONEER'
+  | 'AIWA_RC_T501'
+  | 'DISH'
+  | 'CARRIER_AC'
+  | 'RCMM'
+  | 'EPSON'
+  // Air Conditioning
+  | 'COOLIX'
+  | 'DAIKIN'
+  | 'DAIKIN2'
+  | 'DAIKIN160'
+  | 'DAIKIN176'
+  | 'DAIKIN216'
+  | 'DAIKIN128'
+  | 'MITSUBISHI'
+  | 'MITSUBISHI_AC'
+  | 'MITSUBISHI136'
+  | 'MITSUBISHI112'
+  | 'GREE'
+  | 'FUJITSU_AC'
+  | 'TCL'
+  | 'TCL112AC'
+  | 'HITACHI'
+  | 'HITACHI_AC'
+  | 'HITACHI_AC1'
+  | 'HITACHI_AC2'
+  | 'HITACHI_AC3'
+  | 'HAIER_AC'
+  | 'HAIER_AC_YRW02'
+  | 'KELVINATOR'
+  | 'TOSHIBA_AC'
+  | 'WHIRLPOOL_AC'
+  | 'MIDEA'
+  | 'MIDEA24'
+  | 'VESTEL_AC'
+  | 'ARGO'
+  | 'GOODWEATHER'
+  | 'ELECTRA_AC'
+  | 'SHARP_AC'
+  | 'SAMSUNG_AC'
+  | 'PANASONIC_AC'
+  | 'CARRIER_AC40'
+  | 'CARRIER_AC64'
+  | 'CARRIER_AC84'
+  | 'CARRIER_AC128'
+  | 'BOSCH144'
+  | 'RHOSS'
+  | 'TROTEC_3550'
+  // Fan / Smart Boxes / Lights / Others
+  | 'SYMPHONY'
+  | 'TECHNIBEL_AC'
+  | 'BOSE'
+  | 'WHYNTER'
+  | 'INAX'
+  | 'MULTIBRACKETS'
+  // Raw / Custom
+  | 'RAW'
+  | 'PRONTO'
+  | 'GLOBALCACHE';
 
 export type DeviceCategory =
   | 'tv'
@@ -128,10 +187,14 @@ export interface IRCommand {
   hexCode: string; // e.g. "0x20DF10EF"
   bits: number; // e.g. 32
   rawTimings?: number[]; // Raw microsecond pulses [9000, 4500, 560, 1690, ...]
+  acState?: number[]; // Multi-byte AC state (Daikin, Mitsubishi AC, etc.)
+  repeat?: number; // Number of times to repeat the IR signal (default 0 = send once)
   timestamp: string;
   syncedToEsp32: boolean;
   notes?: string;
   color?: string;
+  manufacturer?: string; // e.g. "Samsung", "LG"
+  deviceModel?: string;  // e.g. "UN55TU7020"
 }
 
 export interface RemoteButtonConfig {
