@@ -1278,7 +1278,7 @@ void executeIRCommand(const IRQueueItem& cmd) {
     irsend.sendPanasonic64(cmd.hex, cmd.bits, cmd.repeat);
   }
   else if (proto == "SHARP") {
-    irsend.sendSharpRaw(cmd.hex, cmd.bits, cmd.repeat);
+    irsend.sendSharp(cmd.hex, cmd.bits, cmd.repeat);
   }
   else if (proto == "DENON") {
     irsend.sendDenon(cmd.hex, cmd.bits, cmd.repeat);
@@ -1299,14 +1299,14 @@ void executeIRCommand(const IRQueueItem& cmd) {
     irsend.sendWhynter(cmd.hex, cmd.bits, cmd.repeat);
   }
 
-  // â”€â”€ Ar-Condicionado com estado multi-byte â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Ar-Condicionado com estado multi-byte ───────────────────────────────────
   else if (proto == "DAIKIN") {
     if (cmd.stateLen == kDaikinStateLength) {
       IRDaikinESP ac(PIN_IR_SEND);
       ac.setRaw(cmd.state);
       ac.send(cmd.repeat);
     } else {
-      irsend.sendDaikin(cmd.hex, cmd.bits, cmd.repeat);
+      irsend.sendDaikin(cmd.state, kDaikinStateLength, cmd.repeat);
     }
   }
   else if (proto == "DAIKIN2") {
@@ -1419,7 +1419,7 @@ void executeIRCommand(const IRQueueItem& cmd) {
     irsend.sendCOOLIX(cmd.hex, cmd.bits, cmd.repeat);
   }
   else if (proto == "VESTEL_AC") {
-    irsend.sendVestelAc(cmd.hex, cmd.bits);
+    irsend.sendVestelAc(cmd.state, kVestelAcStateLength, cmd.repeat);
   }
   else if (proto == "GOODWEATHER") {
     irsend.sendGoodweather(cmd.hex, cmd.bits, cmd.repeat);
