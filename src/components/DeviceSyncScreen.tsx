@@ -356,7 +356,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <Bluetooth className="w-4 h-4 text-sky-500 shrink-0" />
-                      <span className="truncate">{device.name || 'ESP32_IR_HUB'}</span>
+                      <span className="truncate">{device.name || 'Dispositivo BLE'}</span>
                     </div>
                     <span className="text-[10px] font-mono opacity-40 shrink-0 ml-2">{device.deviceId}</span>
                   </button>

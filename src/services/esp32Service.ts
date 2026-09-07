@@ -275,7 +275,7 @@ class ESP32Service {
 
     if (Capacitor.isNativePlatform()) {
       await BleClient.requestLEScan({
-        services: [], // Remove o filtro restrito para facilitar a localização
+        services: [BLE_SERVICES.IR_SERVICE], // Filtro específico para encontrar apenas o HUB
       }, (result) => {
         if (!this.discoveredDevices.find(d => d.deviceId === result.device.deviceId)) {
           this.discoveredDevices.push(result.device);
