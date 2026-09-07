@@ -215,19 +215,44 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
 
   return (
     <div id="device-sync-screen" className="flex flex-col pb-24 px-4 pt-4 max-w-lg mx-auto space-y-6">
-      {onBack && (
-        <button
-          onClick={() => { feedback.playClick(); onBack(); }}
-          className={`flex items-center w-fit gap-2 px-4 py-2 rounded-2xl text-sm font-bold border shadow-sm transition-all active:scale-95 ${
-            isLight ? 'bg-white text-slate-700 border-slate-200' : 'bg-slate-900 text-slate-200 border-slate-800'
-          }`}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>{strings.common.back}</span>
-        </button>
-      )}
+      <div className="flex items-center justify-between w-full">
+        {onBack && (
+          <button
+            onClick={() => { feedback.playClick(); onBack(); }}
+            className={`flex items-center w-fit gap-2 px-4 py-2 rounded-2xl text-sm font-bold border shadow-sm transition-all active:scale-95 ${
+              isLight ? 'bg-white text-slate-700 border-slate-200' : 'bg-slate-900 text-slate-200 border-slate-800'
+            }`}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>{strings.common.back}</span>
+          </button>
+        )}
+      </div>
 
-      {/* STATUS CARD - MAIS BONITO E CONTRASTADO */}
+      {/* NOVO SELETOR DE MODO CENTRALIZADO NO TOPO */}
+      <div className="flex justify-center w-full py-2">
+        <div className={`relative flex items-center p-1.5 rounded-2xl w-64 border ${isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-800 border-slate-700'}`}>
+          <div
+            className={`absolute h-9 w-[120px] rounded-xl transition-all duration-300 ease-in-out shadow-md bg-emerald-500 ${
+              activeMode === 'ble' ? 'translate-x-0' : 'translate-x-[124px]'
+            }`}
+          />
+          <button
+            onClick={() => { feedback.playClick(); esp32.setConnectionMode('ble'); setActiveMode('ble'); }}
+            className={`relative z-10 flex-1 py-2 text-xs font-black uppercase transition-colors duration-300 flex items-center justify-center gap-2 ${activeMode === 'ble' ? 'text-white' : 'text-slate-500'}`}
+          >
+            <Bluetooth className="w-3.5 h-3.5" /> BLE
+          </button>
+          <button
+            onClick={() => { feedback.playClick(); esp32.setConnectionMode('wifi'); setActiveMode('wifi'); }}
+            className={`relative z-10 flex-1 py-2 text-xs font-black uppercase transition-colors duration-300 flex items-center justify-center gap-2 ${activeMode === 'wifi' ? 'text-white' : 'text-slate-500'}`}
+          >
+            <Wifi className="w-3.5 h-3.5" /> WIFI
+          </button>
+        </div>
+      </div>
+
+      {/* STATUS CARD - REMOVIDO O SELETOR DAQUI */}
       <div className={`rounded-[32px] p-6 shadow-2xl border transition-all ${isLight ? 'bg-gradient-to-b from-sky-100/90 via-white to-sky-50 border-sky-200/90 shadow-sky-200/60' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
         <div className={`flex items-center justify-between pb-4 border-b ${isLight ? 'border-sky-100' : 'border-slate-800'}`}>
           <div className="flex items-center gap-4">
@@ -243,28 +268,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                 </div>
               </div>
               <div className="flex items-center gap-3 mt-1">
-                <p className={`text-[11px] font-bold opacity-40 font-mono tracking-widest`}>FIRMWARE V6.1.0</p>
-                <div className={`relative flex items-center p-1 rounded-xl ${isLight ? 'bg-slate-100' : 'bg-slate-800'}`}>
-                  <div
-                    className={`absolute h-6 w-[45px] rounded-lg transition-all duration-300 ease-out shadow-sm ${
-                      activeMode === 'ble'
-                        ? 'translate-x-0 bg-sky-500'
-                        : 'translate-x-[45px] bg-emerald-500'
-                    }`}
-                  />
-                  <button
-                    onClick={() => { feedback.playClick(); esp32.setConnectionMode('ble'); setActiveMode('ble'); }}
-                    className={`relative z-10 w-[45px] py-1 text-[9px] font-black uppercase transition-colors duration-300 ${activeMode === 'ble' ? 'text-white' : 'text-slate-500'}`}
-                  >
-                    BLE
-                  </button>
-                  <button
-                    onClick={() => { feedback.playClick(); esp32.setConnectionMode('wifi'); setActiveMode('wifi'); }}
-                    className={`relative z-10 w-[45px] py-1 text-[9px] font-black uppercase transition-colors duration-300 ${activeMode === 'wifi' ? 'text-white' : 'text-slate-500'}`}
-                  >
-                    WIFI
-                  </button>
-                </div>
+                <p className={`text-[11px] font-bold opacity-40 font-mono tracking-widest`}>FIRMWARE V6.2.0 PRO</p>
                 {espState.isSyncing && (
                   <RefreshCw className="w-3 h-3 animate-spin text-sky-500 opacity-60" />
                 )}
@@ -383,6 +387,15 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
       ) : (
         /* WIFI SECTION - HIGH CONTRAST INPUTS */
         <div className={`rounded-[32px] p-6 shadow-xl border transition-all animate-in fade-in slide-in-from-left-4 duration-300 ${isLight ? 'bg-gradient-to-b from-emerald-50/90 via-white to-emerald-50/30 border-emerald-200/90 shadow-emerald-200/40' : 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-slate-800'}`}>
+          {!espState.bleConnected && (
+            <div className={`mb-4 p-3 rounded-xl border flex items-start gap-3 ${isLight ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-amber-900/20 border-amber-800 text-amber-200'}`}>
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <p className="text-[10px] font-bold leading-tight">
+                AVISO: Conecte via Bluetooth primeiro para que o app possa enviar as credenciais da sua rede para o Hub.
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-4">
               <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${isLight ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
@@ -390,8 +403,13 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               </div>
               <h3 className="font-black text-sm tracking-tight">Configuração Wi-Fi</h3>
             </div>
-            <button onClick={handleScanWiFi} disabled={isScanningWifi} className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all ${isLight ? 'bg-slate-50 border-slate-200 text-emerald-600' : 'bg-slate-900 border-slate-800 text-emerald-400'}`}>
-              <RefreshCw className={`w-4 h-4 ${isScanningWifi ? 'animate-spin' : ''}`} />
+            <button
+              onClick={handleScanWiFi}
+              disabled={isScanningWifi}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl border font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${isLight ? 'bg-slate-50 border-slate-200 text-emerald-600' : 'bg-slate-900 border-slate-800 text-emerald-400'}`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isScanningWifi ? 'animate-spin' : ''}`} />
+              Escanear
             </button>
           </div>
 
@@ -440,7 +458,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
             className={`w-full py-4 rounded-2xl font-black text-xs shadow-lg active:scale-[0.98] transition-all bg-gradient-to-r from-emerald-600 to-teal-700 text-white uppercase tracking-widest flex items-center justify-center gap-2`}
           >
             <Wifi className={`w-3.5 h-3.5 ${isSendingWifi ? 'animate-pulse' : ''}`} />
-            <span>{isSendingWifi ? 'Enviando Dados...' : 'Conectar no WIFI'}</span>
+            <span>{isSendingWifi ? 'Enviando...' : 'Enviar credenciais do WIFI'}</span>
           </button>
         </div>
       </div>
