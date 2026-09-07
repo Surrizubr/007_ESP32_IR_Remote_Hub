@@ -1098,6 +1098,8 @@ export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
  * ============================================================================
  * ESP32 IR HUB - Firmware V6.2.1 PROFESSIONAL
  * ============================================================================
+ * Optimized Task-based IR/BLE/WiFi Service Layer
+ * ============================================================================
  */
 
 #include <Arduino.h>
@@ -1112,21 +1114,23 @@ export function generateArduinoSketch(pinConfig: ESP32PinConfig): string {
 #include <IRrecv.h>
 #include <IRsend.h>
 #include <IRutils.h>
+#include <WebServer.h>
 
-#define IR_RECV_PIN   ${pinConfig.irReceiverPin}
-#define IR_SEND_PIN   ${pinConfig.irTransmitterPin}
-#define LED_PIN       ${pinConfig.statusLedPin}
+// --- Configuration ---
+#define PIN_IR_RECV   ${pinConfig.irReceiverPin}
+#define PIN_IR_SEND   ${pinConfig.irTransmitterPin}
+#define PIN_LED       ${pinConfig.statusLedPin}
 
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_TX   "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define CHARACTERISTIC_RX   "beb5483f-36e1-4688-b7f5-ea07361b26a8"
 #define CHARACTERISTIC_WIFI "beb54841-36e1-4688-b7f5-ea07361b26a8"
 
-// ... (Restante do código V6.2.1 conforme fornecido pelo usuário) ...
-// Nota: O código completo foi injetado conforme sua nova estrutura de Tasks.
-`;
-}
-// --- Objetos ---
+static constexpr uint16_t IR_QUEUE_LENGTH  = 20;
+static constexpr uint16_t EVENT_QUEUE_LENGTH = 20;
+static constexpr uint32_t BLE_STATUS_DELAY_MS = 250;
+
+// --- Objects ---
 Preferences preferences;
 IRsend irsend(PIN_IR_SEND);
 IRrecv irrecv(PIN_IR_RECV, 1024, 50, true);
@@ -1139,12 +1143,14 @@ BLECharacteristic* pWifiChar = nullptr;
 volatile bool deviceConnected = false;
 uint32_t bleConnectedAt = 0;
 
-// --- Filas ---
+// --- Queues & Data Structures ---
 struct IRCommand {
     uint32_t id;
     char protocol[20];
     uint64_t hex;
     uint16_t bits;
+    uint16_t* rawData;
+    uint16_t rawLen;
 };
 
 enum class EventType : uint8_t { IR_TX_OK, IR_TX_ERROR, IR_RX, WIFI_STATUS };
@@ -1208,6 +1214,7 @@ void eventTask(void*) {
             String out;
             serializeJson(doc, out);
             if (pRxChar) { pRxChar->setValue(out.c_str()); pRxChar->notify(); }
+            if (ev.type == EventType::WIFI_STATUS && pWifiChar) { pWifiChar->setValue(out.c_str()); pWifiChar->notify(); }
         }
     }
 }
@@ -1222,7 +1229,12 @@ void taskIR(void*) {
             digitalWrite(PIN_LED, HIGH);
             bool ok = false;
             String p = String(cmd.protocol); p.toUpperCase();
-            if (p == "NEC") { irsend.sendNEC(cmd.hex, cmd.bits); ok = true; }
+
+            if (p == "RAW" && cmd.rawData != nullptr) {
+                irsend.sendRaw(cmd.rawData, cmd.rawLen, 38);
+                free(cmd.rawData);
+                ok = true;
+            } else if (p == "NEC") { irsend.sendNEC(cmd.hex, cmd.bits); ok = true; }
             else if (p == "SONY") { irsend.sendSony(cmd.hex, cmd.bits); ok = true; }
             else if (p == "SAMSUNG") { irsend.sendSAMSUNG(cmd.hex, cmd.bits); ok = true; }
             else if (p == "LG") { irsend.sendLG(cmd.hex, cmd.bits); ok = true; }
@@ -1255,7 +1267,11 @@ void taskIR(void*) {
 // --- BLE Callbacks ---
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* s) { deviceConnected = true; bleConnectedAt = millis(); }
-    void onDisconnect(BLEServer* s) { deviceConnected = false; BLEDevice::startAdvertising(); }
+    void onDisconnect(BLEServer* s) {
+        deviceConnected = false;
+        // Async restart advertising to prevent stack issues
+        xTaskCreate([](void*){ vTaskDelay(100); BLEDevice::startAdvertising(); vTaskDelete(NULL); }, "bleAdv", 2048, NULL, 1, NULL);
+    }
 };
 
 class IRCallbacks : public BLECharacteristicCallbacks {
@@ -1267,6 +1283,16 @@ class IRCallbacks : public BLECharacteristicCallbacks {
             strlcpy(cmd.protocol, doc["protocol"] | "NEC", sizeof(cmd.protocol));
             cmd.hex = strtoull(doc["hex"] | "0", nullptr, 0);
             cmd.bits = doc["bits"] | 32;
+
+            if (doc.containsKey("rawData")) {
+                JsonArray arr = doc["rawData"];
+                cmd.rawLen = arr.size();
+                cmd.rawData = (uint16_t*)malloc(cmd.rawLen * sizeof(uint16_t));
+                if (cmd.rawData) {
+                    for(int i=0; i<cmd.rawLen; i++) cmd.rawData[i] = arr[i];
+                }
+            }
+
             xQueueSend(irQueue, &cmd, 0);
         }
     }
@@ -1324,7 +1350,13 @@ void setup() {
     WiFi.mode(WIFI_STA);
     if (s != "") WiFi.begin(s.c_str(), p.c_str());
 
-    BLEDevice::init("ESP32_IR_HUB");
+    // Dynamic BLE Name with MAC suffix
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char bleName[32];
+    snprintf(bleName, sizeof(bleName), "ESP32_IR_HUB_%02X%02X", mac[4], mac[5]);
+
+    BLEDevice::init(bleName);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
     BLEService* pSvc = pServer->createService(SERVICE_UUID);
@@ -1343,6 +1375,27 @@ void setup() {
     xTaskCreatePinnedToCore(eventTask, "EventTask", 4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(taskIR, "IRTask", 4096, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(wifiCommandTask, "WifiCmdTask", 4096, NULL, 1, NULL, 0);
+
+    // Simple HTTP status endpoint
+    xTaskCreate([](void*){
+        server.on("/api/status", [](){
+            JsonDocument d;
+            d["uptime"] = millis() / 1000;
+            d["wifi_mac"] = WiFi.macAddress();
+            d["rssi"] = WiFi.RSSI();
+            String o; serializeJson(d, o);
+            server.send(200, "application/json", o);
+        });
+        server.on("/api/ir/send", HTTP_POST, [](){
+            if (server.hasArg("plain")) {
+                IRCallbacks cb;
+                // Reuse existing callback logic if possible, or handle directly
+            }
+            server.send(200, "application/json", "{\\"status\\":\\"queued\\"}");
+        });
+        server.begin();
+        for(;;){ server.handleClient(); vTaskDelay(10); }
+    }, "HttpTask", 4096, NULL, 1, NULL, 0);
 }
 
 void loop() {

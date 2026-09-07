@@ -1,9 +1,10 @@
 /*
  * ============================================================================
- * ESP32 IR HUB - Firmware V6.2.0 PROFESSIONAL
+ * ESP32 IR HUB - Firmware V6.2.1 PROFESSIONAL
  * ============================================================================
  * Dual Mode: BLE + WiFi concurrent
  * Event-Driven Architecture with Command IDs
+ * Optimized for Task-based execution and Robust BLE
  * ============================================================================
  */
 
@@ -20,6 +21,7 @@
 #include <IRrecv.h>
 #include <IRsend.h>
 #include <IRutils.h>
+#include <esp_mac.h>
 
 // --- Configuração ---
 static constexpr int PIN_IR_RECV = 15;
@@ -28,9 +30,6 @@ static constexpr int PIN_LED     = 2;
 
 static constexpr uint16_t IR_QUEUE_LENGTH  = 20;
 static constexpr uint16_t EVENT_QUEUE_LENGTH = 20;
-static constexpr uint32_t WIFI_CONNECT_TIMEOUT_MS = 15000;
-static constexpr uint32_t WIFI_RETRY_INTERVAL_MS  = 10000;
-static constexpr uint32_t WIFI_STATUS_INTERVAL_MS = 5000;
 static constexpr uint32_t BLE_STATUS_DELAY_MS     = 250;
 static constexpr uint16_t RAW_MAX_ENTRIES = 1024;
 
@@ -59,20 +58,17 @@ struct IRCommand {
     char protocol[20];
     uint64_t hex;
     uint16_t bits;
-    uint16_t repeat;
-    uint16_t frequency;
+    uint16_t* rawData;
+    uint16_t rawLen;
 };
 
-enum class EventType : uint8_t { IR_TX_OK, IR_TX_ERROR, IR_RX, WIFI_STATUS, SYSTEM_ERROR };
+enum class EventType : uint8_t { IR_TX_OK, IR_TX_ERROR, IR_RX, WIFI_STATUS };
 struct EventMessage {
     EventType type;
     uint32_t id;
     char protocol[20];
     uint64_t hex;
     uint16_t bits;
-    int16_t address;
-    int16_t command;
-    bool success;
     char errorCode[40];
 };
 
@@ -80,7 +76,6 @@ struct WiFiCommand {
     char action[16];
     char ssid[65];
     char password[129];
-    uint32_t id;
 };
 
 QueueHandle_t irQueue = nullptr;
@@ -100,13 +95,6 @@ void sendWifiStatusEvent() {
     xQueueSend(eventQueue, &ev, 0);
 }
 
-// --- LED Management ---
-void blinkLed(int ms) {
-    digitalWrite(PIN_LED, HIGH);
-    delay(ms);
-    digitalWrite(PIN_LED, LOW);
-}
-
 // --- Event Task ---
 void eventTask(void*) {
     EventMessage ev;
@@ -124,8 +112,6 @@ void eventTask(void*) {
                 doc["protocol"] = ev.protocol;
                 doc["hex"] = uint64ToHex(ev.hex);
                 doc["bits"] = ev.bits;
-                if (ev.address != -1) doc["address"] = ev.address;
-                if (ev.command != -1) doc["command"] = ev.command;
             } else if (ev.type == EventType::WIFI_STATUS) {
                 doc["type"] = "wifi_status";
                 doc["connected"] = (WiFi.status() == WL_CONNECTED);
@@ -152,7 +138,12 @@ void taskIR(void*) {
             digitalWrite(PIN_LED, HIGH);
             bool ok = false;
             String p = String(cmd.protocol); p.toUpperCase();
-            if (p == "NEC") { irsend.sendNEC(cmd.hex, cmd.bits); ok = true; }
+
+            if (p == "RAW" && cmd.rawData != nullptr) {
+                irsend.sendRaw(cmd.rawData, cmd.rawLen, 38);
+                free(cmd.rawData);
+                ok = true;
+            } else if (p == "NEC") { irsend.sendNEC(cmd.hex, cmd.bits); ok = true; }
             else if (p == "SONY") { irsend.sendSony(cmd.hex, cmd.bits); ok = true; }
             else if (p == "SAMSUNG") { irsend.sendSAMSUNG(cmd.hex, cmd.bits); ok = true; }
             else if (p == "LG") { irsend.sendLG(cmd.hex, cmd.bits); ok = true; }
@@ -172,7 +163,6 @@ void taskIR(void*) {
             ev.type = EventType::IR_RX;
             ev.hex = results.value;
             ev.bits = results.bits;
-            ev.address = -1; ev.command = -1;
             strlcpy(ev.protocol, typeToString(results.decode_type), sizeof(ev.protocol));
             xQueueSend(eventQueue, &ev, 0);
             delay(50);
@@ -186,7 +176,11 @@ void taskIR(void*) {
 // --- BLE Callbacks ---
 class MyServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* s) { deviceConnected = true; bleConnectedAt = millis(); }
-    void onDisconnect(BLEServer* s) { deviceConnected = false; BLEDevice::startAdvertising(); }
+    void onDisconnect(BLEServer* s) {
+        deviceConnected = false;
+        // Restart advertising asynchronously
+        xTaskCreate([](void*){ vTaskDelay(100); BLEDevice::startAdvertising(); vTaskDelete(NULL); }, "bleAdv", 2048, NULL, 1, NULL);
+    }
 };
 
 class IRCallbacks : public BLECharacteristicCallbacks {
@@ -198,6 +192,16 @@ class IRCallbacks : public BLECharacteristicCallbacks {
             strlcpy(cmd.protocol, doc["protocol"] | "NEC", sizeof(cmd.protocol));
             cmd.hex = strtoull(doc["hex"] | "0", nullptr, 0);
             cmd.bits = doc["bits"] | 32;
+
+            if (doc.containsKey("rawData")) {
+                JsonArray arr = doc["rawData"];
+                cmd.rawLen = arr.size();
+                cmd.rawData = (uint16_t*)malloc(cmd.rawLen * sizeof(uint16_t));
+                if (cmd.rawData) {
+                    for(int i=0; i<cmd.rawLen; i++) cmd.rawData[i] = arr[i];
+                }
+            }
+
             xQueueSend(irQueue, &cmd, 0);
         }
     }
@@ -229,10 +233,8 @@ void wifiCommandTask(void*) {
             } else if (String(cmd.action) == "scan") {
                 int n = WiFi.scanNetworks();
                 for (int i = 0; i < n; i++) {
-                    JsonDocument d;
-                    d["type"] = "wifi_net";
-                    d["ssid"] = WiFi.SSID(i);
-                    d["rssi"] = WiFi.RSSI(i);
+                    JsonDocument d; d["type"] = "wifi_net";
+                    d["ssid"] = WiFi.SSID(i); d["rssi"] = WiFi.RSSI(i);
                     d["secured"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
                     String out; serializeJson(d, out);
                     if (pWifiChar) { pWifiChar->setValue(out.c_str()); pWifiChar->notify(); }
@@ -247,26 +249,28 @@ void wifiCommandTask(void*) {
 void setup() {
     Serial.begin(115200);
     pinMode(PIN_LED, OUTPUT);
-
     irQueue = xQueueCreate(IR_QUEUE_LENGTH, sizeof(IRCommand));
     eventQueue = xQueueCreate(EVENT_QUEUE_LENGTH, sizeof(EventMessage));
     wifiQueue = xQueueCreate(8, sizeof(WiFiCommand));
 
     preferences.begin("wifi", true);
-    String s = preferences.getString("ssid", "");
-    String p = preferences.getString("pass", "");
+    String s = preferences.getString("ssid", ""), p = preferences.getString("pass", "");
     preferences.end();
-
     WiFi.mode(WIFI_STA);
     if (s != "") WiFi.begin(s.c_str(), p.c_str());
 
-    BLEDevice::init("ESP32_IR_HUB");
+    // Dynamic BLE Name with MAC suffix
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char bleName[32];
+    snprintf(bleName, sizeof(bleName), "ESP32_IR_HUB_%02X%02X", mac[4], mac[5]);
+
+    BLEDevice::init(bleName);
     pServer = BLEDevice::createServer();
     pServer->setCallbacks(new MyServerCallbacks());
     BLEService* pSvc = pServer->createService(SERVICE_UUID);
 
-    BLECharacteristic* pTx = pSvc->createCharacteristic(CHARACTERISTIC_TX, BLECharacteristic::PROPERTY_WRITE);
-    pTx->setCallbacks(new IRCallbacks());
+    pSvc->createCharacteristic(CHARACTERISTIC_TX, BLECharacteristic::PROPERTY_WRITE)->setCallbacks(new IRCallbacks());
     pRxChar = pSvc->createCharacteristic(CHARACTERISTIC_RX, BLECharacteristic::PROPERTY_NOTIFY);
     pRxChar->addDescriptor(new BLE2902());
     pWifiChar = pSvc->createCharacteristic(CHARACTERISTIC_WIFI, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
@@ -281,23 +285,29 @@ void setup() {
     xTaskCreatePinnedToCore(taskIR, "IRTask", 4096, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(wifiCommandTask, "WifiCmdTask", 4096, NULL, 1, NULL, 0);
 
-    xTaskCreatePinnedToCore([](void*){ server.on("/api/status", [](){
-        JsonDocument d; d["ip"] = WiFi.localIP().toString(); d["rssi"] = WiFi.RSSI();
-        String o; serializeJson(d, o); server.send(200, "application/json", o);
-    }); server.begin(); for(;;){server.handleClient(); vTaskDelay(10);}}, "HttpTask", 4096, NULL, 1, NULL, 0);
+    // Simple HTTP status endpoint
+    xTaskCreate([](void*){
+        server.on("/api/status", [](){
+            JsonDocument d;
+            d["uptime"] = millis() / 1000;
+            d["wifi_mac"] = WiFi.macAddress();
+            d["rssi"] = WiFi.RSSI();
+            String o; serializeJson(d, o);
+            server.send(200, "application/json", o);
+        });
+        server.begin();
+        for(;;){ server.handleClient(); vTaskDelay(10); }
+    }, "HttpTask", 4096, NULL, 1, NULL, 0);
 }
 
 void loop() {
     static bool lastW = false;
     bool currW = (WiFi.status() == WL_CONNECTED);
     if (currW != lastW) { sendWifiStatusEvent(); lastW = currW; }
-
     if (deviceConnected && bleConnectedAt != 0 && (millis() - bleConnectedAt >= BLE_STATUS_DELAY_MS)) {
         static uint32_t sentAt = 0;
         if (sentAt != bleConnectedAt) { sendWifiStatusEvent(); sentAt = bleConnectedAt; }
     }
-
-    // Heartbeat
     static uint32_t lastH = 0;
     if (millis() - lastH >= (currW ? 2000 : 500)) {
         digitalWrite(PIN_LED, HIGH); delay(20); digitalWrite(PIN_LED, LOW);
