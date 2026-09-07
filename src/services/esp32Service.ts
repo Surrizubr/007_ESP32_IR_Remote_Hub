@@ -296,6 +296,7 @@ class ESP32Service {
     // 1. Native BLE Flow (Capacitor)
     if (Capacitor.isNativePlatform()) {
       try {
+        let deviceName = 'ESP32_IR_HUB';
         if (options?.deviceId) {
           this.deviceId = options.deviceId;
         } else {
@@ -303,6 +304,7 @@ class ESP32Service {
             services: options?.allowAnyDevice ? [] : [BLE_SERVICES.IR_SERVICE],
           });
           this.deviceId = device.deviceId;
+          deviceName = device.name || 'ESP32_IR_HUB';
         }
 
         await BleClient.connect(this.deviceId, () => {
@@ -320,13 +322,16 @@ class ESP32Service {
 
         if (Capacitor.getPlatform() === 'android') {
           try {
-            await BleClient.requestMtu(this.deviceId, 512);
+            // @ts-ignore - Some versions of BleClient might not have this in types but it exists in the plugin
+            if ((BleClient as any).requestMtu) {
+              await (BleClient as any).requestMtu(this.deviceId, 512);
+            }
             await new Promise(r => setTimeout(r, 200));
           } catch (e) { }
         }
 
         this.state.bleConnected = true;
-        this.state.bleDeviceName = device.name || 'ESP32_IR_HUB';
+        this.state.bleDeviceName = deviceName;
         this.isSimulated = false;
 
         await new Promise(r => setTimeout(r, 300));

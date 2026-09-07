@@ -478,7 +478,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
 
         {/* PING / MANUAL IP TOOL */}
         {/* PING TEST (Only for WiFi Mode) */}
-        {mode === 'wifi' && (
+        {activeMode === 'wifi' && (
           <div className="mb-6 space-y-3">
             <div className="flex items-center justify-between px-1">
               <span className="text-[10px] font-black opacity-30 uppercase tracking-widest">Conexão Manual (Ping)</span>
