@@ -477,47 +477,50 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
         </div>
 
         {/* PING / MANUAL IP TOOL */}
-        <div className="mb-6 space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-black opacity-30 uppercase tracking-widest">Conexão Manual (Ping)</span>
-            {pingResult !== null && (
-              <span className={`text-[10px] font-black ${pingResult < 200 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {pingResult}ms
-              </span>
+        {/* PING TEST (Only for WiFi Mode) */}
+        {mode === 'wifi' && (
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[10px] font-black opacity-30 uppercase tracking-widest">Conexão Manual (Ping)</span>
+              {pingResult !== null && (
+                <span className={`text-[10px] font-black ${pingResult < 200 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {pingResult}ms
+                </span>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customIp}
+                onChange={(e) => setCustomIp(e.target.value)}
+                placeholder="Ex: 192.168.1.100"
+                className={`flex-1 p-3 rounded-xl text-xs font-mono font-bold border outline-none focus:border-amber-500 ${
+                  isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
+                }`}
+              />
+              <button
+                onClick={handleTestPing}
+                disabled={isPinging}
+                className={`px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${
+                  isPinging ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-md'
+                }`}
+              >
+                {isPinging ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Ping'}
+              </button>
+            </div>
+
+            {pingMessage && (
+              <div className={`p-3 rounded-xl text-[10px] font-bold border ${
+                pingMessage.includes('Conectado')
+                  ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+                  : 'bg-rose-50 border-rose-100 text-rose-700'
+              }`}>
+                {pingMessage}
+              </div>
             )}
           </div>
-
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={customIp}
-              onChange={(e) => setCustomIp(e.target.value)}
-              placeholder="Ex: 192.168.1.100"
-              className={`flex-1 p-3 rounded-xl text-xs font-mono font-bold border outline-none focus:border-amber-500 ${
-                isLight ? 'bg-slate-50 border-slate-200 text-slate-900' : 'bg-slate-950 border-slate-800 text-white'
-              }`}
-            />
-            <button
-              onClick={handleTestPing}
-              disabled={isPinging}
-              className={`px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ${
-                isPinging ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-md'
-              }`}
-            >
-              {isPinging ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Ping'}
-            </button>
-          </div>
-
-          {pingMessage && (
-            <div className={`p-3 rounded-xl text-[10px] font-bold border ${
-              pingMessage.includes('Conectado')
-                ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
-                : 'bg-rose-50 border-rose-100 text-rose-700'
-            }`}>
-              {pingMessage}
-            </div>
-          )}
-        </div>
+        )}
 
         <button
           onClick={handleTestIrTx}
