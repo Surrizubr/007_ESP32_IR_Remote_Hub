@@ -603,8 +603,14 @@ class ESP32Service {
       if (this.state.connectionType === 'ble' && (this.deviceId || this.webServer)) {
         try {
           await this.writeBle(BLE_SERVICES.IR_SERVICE, BLE_SERVICES.WIFI_CHAR, payload);
+          this.state.connectionType = 'wifi';
+          this.state.connected = true;
+          this.notify();
+          await new Promise(r => setTimeout(r, 1500));
+          await this.refreshConnection();
+          const nextIp = this.state.ipAddress || '192.168.4.1';
           this.addLog('success', 'Credenciais enviadas via BLE!');
-          return { success: true, ip: this.state.ipAddress, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
+          return { success: true, ip: nextIp, message: 'Credenciais enviadas ao ESP32 via BLE! Aguarde a associação.' };
         } catch (e: any) {
           this.addLog('error', `Falha BLE Wi-Fi: ${e.message}`);
           console.error('BLE WiFi error', e);
@@ -657,7 +663,6 @@ class ESP32Service {
 
   // Scan available real residential WiFis
   public async scanWiFiNetworks(targetIp?: string): Promise<WiFiNetwork[]> {
-    if (this.state.isSyncing) return [];
     this.state.isSyncing = true;
     this.notify();
 

@@ -152,6 +152,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   // Scan real residential Wi-Fi networks
   const handleScanWiFi = async () => {
     setIsScanningWifi(true);
+    setAvailableNetworks([]);
     setWifiScanStatus({ text: strings.sync.scanningNetworks });
     feedback.playClick();
     try {
@@ -172,10 +173,23 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   const handleSendWifi = async () => {
     if (!ssid.trim()) { alert(strings.sync.wifiSsidPlaceholder); return; }
     setIsSendingWifi(true);
+    setWifiSuccessMsg(null);
     feedback.playClick(800, 0.05);
-    const res = await esp32.sendWiFiCredentials(ssid, password);
+    const res = await esp32.sendWiFiCredentials(ssid.trim(), password);
     setIsSendingWifi(false);
     setWifiSuccessMsg(res.message);
+
+    if (res.success) {
+      await esp32.refreshConnection();
+      const refreshedState = esp32.getState();
+      if (refreshedState.wifiConnected || refreshedState.ipAddress) {
+        setWifiScanStatus({
+          text: refreshedState.ipAddress ? `Conectado em ${refreshedState.ipAddress}` : 'Wi‑Fi conectado',
+          isSuccess: true,
+        });
+      }
+    }
+
     feedback.playCaptureSuccess();
   };
 
