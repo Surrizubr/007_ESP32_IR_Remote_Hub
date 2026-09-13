@@ -642,8 +642,8 @@ export const DrawerMenu: React.FC<DrawerMenuProps> = ({
                   </span>
                 </div>
                 <div className={`text-xs font-mono font-semibold flex items-center justify-between ${isLight ? 'text-slate-700' : 'text-slate-300'}`}>
-                  <span>{espState.connectionType === 'wifi' ? `IP: ${espState.ipAddress}` : `BLE: ${espState.bleDeviceName}`}</span>
-                  <span className="text-[10px] text-slate-500 font-sans">{strings.drawer.uptime}: {Math.floor(espState.uptime / 60)}m</span>
+                  <span>{espState.ipAddress ? `IP: ${espState.ipAddress}` : 'Wi-Fi'}</span>
+                  <span className="text-[10px] text-slate-500 font-sans">{strings.drawer.uptime}: {Math.floor((espState.uptimeSeconds || 0) / 60)}m</span>
                 </div>
               </div>
 

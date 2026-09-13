@@ -1,104 +1,76 @@
 /*
- * ESP32 IR HUB - Firmware v6.1.0
- * Multi-Mode: BLE & WiFi (Concurrent & Persistent)
- * Optimized with FreeRTOS (Core 0: Web/WiFi, Core 1: IR/BLE)
- * Features: Enhanced BLE visibility, Heartbeat LED diagnostics, Persistent Reconnect.
+ * ESP32 IR HUB - Firmware v7.0.0
+ * Modo: WiFi Only
+ * Comunicação: HTTP REST sobre WiFi (mesma rede local)
+ * Features: mDNS, IR Transmit, IR Receive (polling), Heartbeat LED
+ *
+ * ─────────────────────────────────────────────────────────────
+ *  CONFIGURAÇÃO: preencha o SSID e a senha da sua rede WiFi.
+ *  Se deixar "SEU_SSID_AQUI", ele tentará usar credenciais salvas na NVS.
+ * ─────────────────────────────────────────────────────────────
  */
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <WebServer.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#include <BLE2902.h>
-#include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include <IRremote.h>
+#include <IRrecv.h>
+#include <IRsend.h>
+#include <IRutils.h>
 
-// --- Configuration ---
+// ─── Credenciais WiFi (preencha aqui) ─────────────────────────
+const char* WIFI_SSID = "SEU_SSID_AQUI";
+const char* WIFI_PASS = "SUA_SENHA_AQUI";
+// ──────────────────────────────────────────────────────────────
+
+// --- Configuração de pinos ---
 const int PIN_IR_RECV = 15;
 const int PIN_IR_SEND = 4;
-const int PIN_LED = 2; // Onboard Blue LED
-const int PIN_BUZZER = 18;
+const int PIN_LED     = 2; // LED onboard (azul)
 
-// --- Persistent Storage ---
-Preferences preferences;
-
-// --- IR Instances ---
+// --- Instâncias IR ---
 IRsend irsend(PIN_IR_SEND);
-IRrecv irrecv(PIN_IR_RECV);
-decode_results results;
+IRrecv irrecv(PIN_IR_RECV, 1024, 50, true);
+decode_results irResults;
 
 // --- WebServer ---
 WebServer server(80);
 
-// --- BLE UUIDs ---
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_TX   "beb5483e-36e1-4688-b7f5-ea07361b26a8" // App writes to ESP
-#define CHARACTERISTIC_RX   "beb5483f-36e1-4688-b7f5-ea07361b26a8" // ESP notifies App
-#define CHARACTERISTIC_WIFI "beb54841-36e1-4688-b7f5-ea07361b26a8"
-
-BLEServer* pServer = NULL;
-BLECharacteristic* pRxChar = NULL;
-BLECharacteristic* pWifiChar = NULL;
-bool deviceConnected = false;
-
-// --- System State ---
-String wifi_ssid = "";
-String wifi_pass = "";
-bool wifiConnected = false;
-unsigned long lastHeartbeat = 0;
-unsigned long ledOverrideUntil = 0;
-
-// --- Queue for IR Commands ---
+// --- Queue para comandos IR a serem transmitidos ---
 struct IRCommand {
-  char protocol[20];
+  uint32_t id;
+  char     protocol[20];
   uint64_t hex;
-  int bits;
+  uint16_t bits;
+  uint16_t* rawData;
+  uint16_t  rawLen;
 };
-QueueHandle_t irQueue;
+QueueHandle_t irTxQueue;
 
-// --- Helpers ---
-void triggerLedPulse(uint32_t durationMs) {
-  ledOverrideUntil = millis() + durationMs;
-  digitalWrite(PIN_LED, HIGH);
-}
+// --- Buffer de IR recebido (para polling do app) ---
+struct IRReceived {
+  char     protocol[20];
+  char     hex[20];
+  uint16_t bits;
+  bool     hasNew;
+};
 
-void blinkLed(int times, int duration) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(PIN_LED, HIGH);
-    delay(duration);
-    digitalWrite(PIN_LED, LOW);
-    if (i < times - 1) delay(duration);
-  }
-}
+SemaphoreHandle_t irRxMutex;
+IRReceived latestRxSignal = {"", "", 0, false};
 
-void sendWifiStatus(const String& status, const String& message, bool connected, const String& ip = "", int rssi = -100) {
-  if (!pWifiChar || !deviceConnected) return;
-  DynamicJsonDocument doc(256);
-  doc["type"] = "wifi_status";
-  doc["status"] = status;
-  doc["message"] = message;
-  doc["connected"] = connected;
-  if (ip.length() > 0) doc["ip"] = ip;
-  if (rssi > -100) doc["rssi"] = rssi;
-  String out;
-  serializeJson(doc, out);
-  pWifiChar->setValue(out.c_str());
-  pWifiChar->notify();
-}
+// --- Estado do LED ---
+unsigned long lastHeartbeat = 0;
+
+// ─────────────────────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────────────────────
 
 void handleHeartbeat() {
   unsigned long now = millis();
-  if (now < ledOverrideUntil) {
-    digitalWrite(PIN_LED, HIGH);
-    return;
-  }
-
   if (WiFi.status() == WL_CONNECTED) {
+    // Pulso simples a cada 2 s: conectado
     if (now - lastHeartbeat >= 2000) {
       digitalWrite(PIN_LED, HIGH);
       delay(30);
@@ -106,6 +78,7 @@ void handleHeartbeat() {
       lastHeartbeat = now;
     }
   } else {
+    // Piscada rápida: tentando conectar
     if (now - lastHeartbeat >= 500) {
       digitalWrite(PIN_LED, !digitalRead(PIN_LED));
       lastHeartbeat = now;
@@ -113,176 +86,175 @@ void handleHeartbeat() {
   }
 }
 
-void processIRCommand(String json) {
-  DynamicJsonDocument doc(1024);
-  DeserializationError error = deserializeJson(doc, json);
-  if (error) return;
+// ─────────────────────────────────────────────────────────────
+//  Handlers HTTP
+// ─────────────────────────────────────────────────────────────
 
-  IRCommand cmd;
-  strlcpy(cmd.protocol, doc["protocol"] | "NEC", sizeof(cmd.protocol));
-  cmd.hex = (uint64_t)(doc["hex"] | 0);
-  cmd.bits = doc["bits"] | 32;
-
-  xQueueSend(irQueue, &cmd, portMAX_DELAY);
+// GET /
+void handleRoot() {
+  server.send(200, "text/plain", "ESP32 IR HUB v7.0.0 WiFi-Only Online");
 }
 
-// --- BLE Callbacks ---
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* s) { deviceConnected = true; Serial.println("BLE Connected"); }
-    void onDisconnect(BLEServer* s) {
-      deviceConnected = false;
-      Serial.println("BLE Disconnected");
-      BLEDevice::startAdvertising();
-    }
-};
-
-class IRCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pChar) {
-      String value = String((char*)pChar->getValue().data());
-      if (value.length() > 0) processIRCommand(value);
-    }
-};
-
-class WiFiConfigCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pChar) {
-      String value = String((char*)pChar->getValue().data());
-      DynamicJsonDocument doc(512);
-      if (deserializeJson(doc, value) == DeserializationError::Ok) {
-        String action = doc["action"] | "";
-
-        if (action == "scan") {
-          Serial.println("WiFi Scan Requested via BLE...");
-          int n = WiFi.scanNetworks();
-          for (int i = 0; i < n; i++) {
-            DynamicJsonDocument response(256);
-            response["type"] = "wifi_net";
-            response["ssid"] = WiFi.SSID(i);
-            response["rssi"] = WiFi.RSSI(i);
-            response["secured"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-            response["channel"] = WiFi.channel(i);
-            String out;
-            serializeJson(response, out);
-            pWifiChar->setValue(out.c_str());
-            pWifiChar->notify();
-            delay(20);
-          }
-          pWifiChar->setValue("{\"type\":\"wifi_done\"}");
-          pWifiChar->notify();
-          WiFi.scanDelete();
-        }
-        else if (action == "connect") {
-          wifi_ssid = doc["ssid"].as<String>();
-          wifi_pass = doc["password"].as<String>();
-
-          preferences.begin("wifi", false);
-          preferences.putString("ssid", wifi_ssid);
-          preferences.putString("pass", wifi_pass);
-          preferences.end();
-
-          Serial.println("WiFi Credentials Saved. Connecting...");
-          sendWifiStatus("connecting", "Saved! Connecting to WiFi...", false);
-          WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-        }
-      }
-    }
-};
-
-// --- WebServer Handlers ---
-void handleRoot() { server.send(200, "text/plain", "ESP32 IR HUB v6.1.0 Online"); }
-
+// GET /api/status
 void handleStatus() {
-  DynamicJsonDocument doc(256);
-  doc["status"] = "online";
-  doc["wifi_mac"] = WiFi.macAddress();
-  doc["ble_mac"] = BLEDevice::getAddress().toString().c_str();
-  doc["ip"] = WiFi.localIP().toString();
-  doc["rssi"] = WiFi.RSSI();
-  doc["uptime"] = millis() / 1000;
-  doc["freeHeap"] = ESP.getFreeHeap();
-  doc["firmware"] = "6.1.0";
+  JsonDocument doc;
+  doc["status"]    = "online";
+  doc["firmware"]  = "7.0.0";
+  doc["wifi_mac"]  = WiFi.macAddress();
+  doc["ip"]        = WiFi.localIP().toString();
+  doc["rssi"]      = WiFi.RSSI();
+  doc["uptime"]    = millis() / 1000;
+  doc["freeHeap"]  = ESP.getFreeHeap();
+
+  String out;
+  serializeJson(doc, out);
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", out);
+}
+
+// POST /api/ir/send   body: plain=<JSON>
+void handleIRSend() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"success\":false,\"error\":\"missing body\"}");
+    return;
+  }
+
+  String body = server.arg("plain");
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    server.send(400, "application/json", "{\"success\":false,\"error\":\"invalid json\"}");
+    return;
+  }
+
+  IRCommand cmd{};
+  cmd.id   = doc["id"] | 0;
+  strlcpy(cmd.protocol, doc["protocol"] | "NEC", sizeof(cmd.protocol));
+  cmd.hex  = strtoull(doc["hex"] | "0", nullptr, 0);
+  cmd.bits = doc["bits"] | 32;
+
+  // Suporte a RAW
+  if (doc["rawData"].is<JsonArray>()) {
+    JsonArray arr = doc["rawData"];
+    cmd.rawLen  = arr.size();
+    cmd.rawData = (uint16_t*)malloc(cmd.rawLen * sizeof(uint16_t));
+    if (cmd.rawData) {
+      for (int i = 0; i < cmd.rawLen; i++) cmd.rawData[i] = arr[i];
+    }
+  }
+
+  xQueueSend(irTxQueue, &cmd, portMAX_DELAY);
+  server.send(200, "application/json", "{\"success\":true,\"status\":\"queued\"}");
+}
+
+// GET /api/ir/receive   — polling: app pergunta se chegou algum sinal
+void handleIRReceive() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+
+  xSemaphoreTake(irRxMutex, portMAX_DELAY);
+  IRReceived snap = latestRxSignal;
+  latestRxSignal.hasNew = false; // consumiu
+  xSemaphoreGive(irRxMutex);
+
+  JsonDocument doc;
+  doc["hasNew"]   = snap.hasNew;
+  if (snap.hasNew) {
+    doc["protocol"] = snap.protocol;
+    doc["hex"]      = snap.hex;
+    doc["bits"]     = snap.bits;
+  }
+
   String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
 
-void handleIRSend() {
-  if (server.hasArg("plain")) {
-    processIRCommand(server.arg("plain"));
-    server.send(200, "application/json", "{\"success\":true}");
-  } else {
-    server.send(400, "application/json", "{\"success\":false}");
-  }
+// OPTIONS — CORS preflight
+void handleOptions() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.send(204);
 }
 
-// --- Tasks ---
-void taskWiFi(void* pvParameters) {
-  server.on("/", handleRoot);
-  server.on("/api/status", handleStatus);
-  server.on("/api/ir/send", HTTP_POST, handleIRSend);
+// ─────────────────────────────────────────────────────────────
+//  Task: WebServer (Core 0)
+// ─────────────────────────────────────────────────────────────
+
+void taskWebServer(void* pvParameters) {
+  server.on("/",                HTTP_GET,     handleRoot);
+  server.on("/api/status",      HTTP_GET,     handleStatus);
+  server.on("/api/ir/send",     HTTP_POST,    handleIRSend);
+  server.on("/api/ir/receive",  HTTP_GET,     handleIRReceive);
+  server.onNotFound([]() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (server.method() == HTTP_OPTIONS) { handleOptions(); return; }
+    server.send(404, "application/json", "{\"error\":\"not found\"}");
+  });
   server.begin();
+  Serial.println("[HTTP] WebServer iniciado na porta 80");
 
   for (;;) {
     server.handleClient();
-    ArduinoOTA.handle();
-    vTaskDelay(10 / portTICK_PERIOD_MS);
+    vTaskDelay(5 / portTICK_PERIOD_MS);
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  Task: IR TX + RX (Core 1)
+// ─────────────────────────────────────────────────────────────
+
 void taskIR(void* pvParameters) {
   irrecv.enableIRIn();
-  irsend.begin(PIN_IR_SEND);
+  irsend.begin();
 
   IRCommand cmd;
   for (;;) {
-    // Check for outgoing commands
-    if (xQueueReceive(irQueue, &cmd, 10 / portTICK_PERIOD_MS) == pdTRUE) {
-      triggerLedPulse(120);
+    // Transmitir comandos enfileirados
+    if (xQueueReceive(irTxQueue, &cmd, 10 / portTICK_PERIOD_MS) == pdTRUE) {
+      digitalWrite(PIN_LED, HIGH);
       String proto = String(cmd.protocol);
       proto.toUpperCase();
 
-      if (proto == "NEC") irsend.sendNEC(cmd.hex, cmd.bits);
-      else if (proto == "SONY") irsend.sendSony(cmd.hex, cmd.bits);
-      else if (proto == "SAMSUNG") irsend.sendSAMSUNG(cmd.hex, cmd.bits);
-      else if (proto == "LG") irsend.sendLG(cmd.hex, cmd.bits);
-      else irsend.sendNEC(cmd.hex, cmd.bits);
+      if (proto == "RAW" && cmd.rawData != nullptr) {
+        irsend.sendRaw(cmd.rawData, cmd.rawLen, 38);
+        free(cmd.rawData);
+      } else if (proto == "NEC")     irsend.sendNEC(cmd.hex, cmd.bits);
+      else if (proto == "SONY")      irsend.sendSony(cmd.hex, cmd.bits);
+      else if (proto == "SAMSUNG")   irsend.sendSAMSUNG(cmd.hex, cmd.bits);
+      else if (proto == "LG")        irsend.sendLG(cmd.hex, cmd.bits);
+      else if (proto == "RC5")       irsend.sendRC5(cmd.hex, cmd.bits);
+      else if (proto == "RC6")       irsend.sendRC6(cmd.hex, cmd.bits);
+      else if (proto == "PANASONIC") irsend.sendPanasonic(cmd.hex >> 16, cmd.hex & 0xFFFF);
+      else if (proto == "JVC")       irsend.sendJVC(cmd.hex, cmd.bits, 0);
+      else if (proto == "SHARP")     irsend.sendSharp(cmd.hex >> 8, cmd.hex & 0xFF);
+      else                           irsend.sendNEC(cmd.hex, cmd.bits); // fallback NEC
 
+      Serial.printf("[IR TX] %s 0x%llX (%d bits)\n", cmd.protocol, cmd.hex, cmd.bits);
       delay(50);
       digitalWrite(PIN_LED, LOW);
     }
 
-    // Check for incoming signals
-    if (irrecv.decode(&results)) {
-      triggerLedPulse(120);
-      auto decodeTypeToProtocol = [](int dt) {
-        switch (dt) {
-          case NEC: return String("NEC");
-          case SONY: return String("SONY");
-          case RC5: return String("RC5");
-          case RC6: return String("RC6");
-          case SAMSUNG: return String("SAMSUNG");
-          case LG: return String("LG");
-          default: return String("UNKNOWN");
-        }
-      };
+    // Receber sinais IR
+    if (irrecv.decode(&irResults)) {
+      digitalWrite(PIN_LED, HIGH);
 
-      String protocol = decodeTypeToProtocol(results.decode_type);
-      char hex[32];
-      snprintf(hex, sizeof(hex), "0x%lX", (unsigned long)results.value);
+      String protocol = typeToString(irResults.decode_type);
+      char hexStr[20];
+      sprintf(hexStr, "0x%llX", irResults.value);
 
-      DynamicJsonDocument doc(256);
-      doc["type"] = "rx";
-      doc["protocol"] = protocol;
-      doc["hex"] = hex;
-      doc["bits"] = results.bits;
-      String out;
-      serializeJson(doc, out);
+      Serial.printf("[IR RX] %s %s (%d bits)\n", protocol.c_str(), hexStr, irResults.bits);
 
-      if (deviceConnected) {
-        pRxChar->setValue(out.c_str());
-        pRxChar->notify();
-      }
+      // Salva no buffer para polling HTTP
+      xSemaphoreTake(irRxMutex, portMAX_DELAY);
+      strlcpy(latestRxSignal.protocol, protocol.c_str(), sizeof(latestRxSignal.protocol));
+      strlcpy(latestRxSignal.hex, hexStr, sizeof(latestRxSignal.hex));
+      latestRxSignal.bits   = irResults.bits;
+      latestRxSignal.hasNew = true;
+      xSemaphoreGive(irRxMutex);
 
-      Serial.printf("IR RX: %s %s\n", protocol.c_str(), hex);
       delay(100);
       digitalWrite(PIN_LED, LOW);
       irrecv.resume();
@@ -292,95 +264,89 @@ void taskIR(void* pvParameters) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+//  setup()
+// ─────────────────────────────────────────────────────────────
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED, OUTPUT);
 
-  irQueue = xQueueCreate(10, sizeof(IRCommand));
+  Serial.println("\n==============================");
+  Serial.println("  ESP32 IR HUB v7.0.0 WiFi");
+  Serial.println("==============================");
 
-  // Load Credentials
-  preferences.begin("wifi", true);
-  wifi_ssid = preferences.getString("ssid", "");
-  wifi_pass = preferences.getString("pass", "");
-  preferences.end();
+  // Criar filas e mutex
+  irTxQueue = xQueueCreate(20, sizeof(IRCommand));
+  irRxMutex = xSemaphoreCreateMutex();
 
-  // Start WiFi Attempt
-  WiFi.mode(WIFI_STA);
-  WiFi.setAutoReconnect(true); // Ensure persistent reconnect
-  if (wifi_ssid != "") {
-    WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-    Serial.println("Connecting to saved WiFi...");
+  // Verificar credenciais salvas em NVS (fallback)
+  Preferences prefs;
+  prefs.begin("wifi_cfg", true);
+  String savedSsid = prefs.getString("ssid", "");
+  String savedPass = prefs.getString("pass", "");
+  prefs.end();
+
+  String ssidToUse = WIFI_SSID;
+  String passToUse = WIFI_PASS;
+
+  if (ssidToUse == "SEU_SSID_AQUI" && savedSsid.length() > 0) {
+    ssidToUse = savedSsid;
+    passToUse = savedPass;
+    Serial.printf("[WiFi] Usando rede salva na memoria: \"%s\"\n", ssidToUse.c_str());
   }
 
-  // OTA setup
-  ArduinoOTA.setHostname("esp32-ir-hub");
-  ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
-  ArduinoOTA.onEnd([]() { Serial.println("OTA End"); });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("OTA Progress: %u%%\n", (progress * 100) / total);
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("OTA Error[%u]\n", error);
-  });
-  ArduinoOTA.begin();
+  // Conectar ao WiFi
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(ssidToUse.c_str(), passToUse.c_str());
 
-  // BLE Setup (Always on in dual-mode)
-  BLEDevice::init("ESP32_IR_HUB");
-  BLEDevice::setPower(ESP_PWR_LVL_P9); // Max power for visibility
+  Serial.printf("[WiFi] Conectando a \"%s\"", ssidToUse.c_str());
+  // Aguarda até 15 s na inicialização para dar feedback via Serial
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  Serial.println();
 
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new MyServerCallbacks());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[WiFi] Conectado! IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("[WiFi] RSSI: %d dBm\n", WiFi.RSSI());
+  } else {
+    Serial.println("[WiFi] Falha na conexão inicial — tentará reconectar em background.");
+  }
 
-  BLEService *pSvc = pServer->createService(SERVICE_UUID);
+  // mDNS: acesse como http://esp32-ir-hub.local
+  if (MDNS.begin("esp32-ir-hub")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("[mDNS] Hostname: esp32-ir-hub.local");
+  }
 
-  BLECharacteristic *pTx = pSvc->createCharacteristic(CHARACTERISTIC_TX, BLECharacteristic::PROPERTY_WRITE);
-  pTx->setCallbacks(new IRCallbacks());
+  // Criar tasks FreeRTOS
+  xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(taskIR,        "IRTask",        4096, NULL, 2, NULL, 1);
 
-  pRxChar = pSvc->createCharacteristic(CHARACTERISTIC_RX, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ);
-  pRxChar->addDescriptor(new BLE2902());
-
-  pWifiChar = pSvc->createCharacteristic(CHARACTERISTIC_WIFI, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-  pWifiChar->setCallbacks(new WiFiConfigCallbacks());
-  pWifiChar->addDescriptor(new BLE2902());
-
-  pSvc->start();
-
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06); // iPhone compatibility
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  Serial.println("BLE Advertising started.");
-
-  // Create Tasks
-  xTaskCreatePinnedToCore(taskWiFi, "WiFiTask", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(taskIR, "IRTask", 4096, NULL, 2, NULL, 1);
+  Serial.println("[Setup] Pronto!");
 }
+
+// ─────────────────────────────────────────────────────────────
+//  loop() — Apenas heartbeat LED
+// ─────────────────────────────────────────────────────────────
 
 void loop() {
   handleHeartbeat();
 
-  // Check WiFi connection status and notify via BLE if it just connected
-  static bool lastWifiConnected = false;
-  bool currentWifiConnected = (WiFi.status() == WL_CONNECTED);
-
-  if (currentWifiConnected && !lastWifiConnected) {
-    if (deviceConnected && pWifiChar) {
-      sendWifiStatus("connected", "WiFi connected", true, WiFi.localIP().toString(), WiFi.RSSI());
-    }
-    lastWifiConnected = true;
-    wifiConnected = true;
-    Serial.print("WiFi Connected! IP: ");
-    Serial.println(WiFi.localIP());
-  } else if (!currentWifiConnected && lastWifiConnected) {
-    if (deviceConnected && pWifiChar) {
-      sendWifiStatus("disconnected", "WiFi disconnected", false, "", WiFi.RSSI());
-    }
-    lastWifiConnected = false;
-    wifiConnected = false;
-    Serial.println("WiFi Disconnected. Reconnecting...");
+  // Log de reconexão WiFi
+  static bool lastConnected = false;
+  bool connected = (WiFi.status() == WL_CONNECTED);
+  if (connected && !lastConnected) {
+    Serial.printf("[WiFi] Reconectado! IP: %s\n", WiFi.localIP().toString().c_str());
+  } else if (!connected && lastConnected) {
+    Serial.println("[WiFi] Desconectado. Aguardando reconexão automática...");
   }
+  lastConnected = connected;
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
 }

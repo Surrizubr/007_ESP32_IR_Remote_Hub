@@ -63,11 +63,7 @@ export const Header: React.FC<HeaderProps> = ({
           aria-label={strings.drawer.hardwareStatusTitle}
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold border transition-all active:scale-95 ${
             espState.connected
-              ? espState.connectionType === 'ble'
-                ? isLight
-                  ? 'bg-sky-100 border-sky-300 text-sky-800 shadow-xs'
-                  : 'bg-blue-950/80 border-blue-700/60 text-blue-300 shadow-xs shadow-blue-950'
-                : isLight
+              ? isLight
                 ? 'bg-emerald-100 border-emerald-300 text-emerald-800 shadow-xs'
                 : 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300 shadow-xs shadow-emerald-950'
               : isLight
@@ -79,39 +75,21 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="relative flex h-2 w-2">
             {espState.connected && (
               <span
-                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                  espState.connectionType === 'ble' ? 'bg-blue-500' : 'bg-emerald-500'
-                }`}
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-emerald-500"
               ></span>
             )}
             <span
               className={`relative inline-flex rounded-full h-2 w-2 ${
-                espState.connected
-                  ? espState.connectionType === 'ble'
-                    ? 'bg-blue-500'
-                    : 'bg-emerald-500'
-                  : 'bg-rose-500'
+                espState.connected ? 'bg-emerald-500' : 'bg-rose-500'
               }`}
             ></span>
           </span>
 
           <span className="text-[11px] font-bold">
             {espState.connected ? (
-              espState.connectionType === 'both' ? (
-                <span className="flex items-center gap-1">
-                  <Bluetooth className="w-3 h-3 inline" />
-                  <Wifi className="w-3 h-3 inline" />
-                  {strings.common.hybridMode || 'Hybrid'}
-                </span>
-              ) : espState.connectionType === 'ble' ? (
-                <span className="flex items-center gap-1">
-                  <Bluetooth className="w-3 h-3 inline" /> {strings.common.online}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1">
-                  <Wifi className="w-3 h-3 inline" /> {strings.common.online}
-                </span>
-              )
+              <span className="flex items-center gap-1">
+                <Wifi className="w-3 h-3 inline" /> {strings.common.online}
+              </span>
             ) : (
               <span className="flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 inline" /> {strings.common.offline}

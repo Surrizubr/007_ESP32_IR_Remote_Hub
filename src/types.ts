@@ -251,19 +251,13 @@ export interface ServiceLog {
 
 export interface ESP32DeviceState {
   connected: boolean;
-  connectionType: 'ble' | 'wifi' | 'both' | 'offline';
-  connectionMode: 'ble' | 'wifi';
-  bleConnected: boolean;
+  connectionType: 'wifi' | 'offline';
   wifiConnected: boolean;
-  bleDeviceName: string;
   wifiSsid: string;
-  wifiPassword?: string;
   ipAddress: string;
-  bleMac?: string;
   wifiMac?: string;
-  rssi: number; // General or last updated RSSI
+  rssi: number;
   wifiRssi?: number;
-  bleRssi?: number;
   uptimeSeconds: number;
   freeHeap: number; // bytes
   isSyncing?: boolean;

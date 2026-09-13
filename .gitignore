@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+.pio/
+android/local.properties
+.gradle/
