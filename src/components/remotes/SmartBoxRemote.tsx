@@ -70,55 +70,6 @@ export const SmartBoxRemote: React.FC<SmartBoxRemoteProps> = ({
 
   return (
     <div id="smartbox-remote-layout" className="w-full flex flex-col items-center space-y-3.5 animate-in fade-in duration-200">
-      {/* SMART BOX STATUS DISPLAY */}
-      <div
-        id="smartbox-status-display"
-        className={`w-full rounded-2xl p-3.5 border font-mono relative overflow-hidden transition-all shadow-inner ${
-          isLight
-            ? 'bg-gradient-to-b from-sky-50 via-white to-indigo-50/60 border-sky-200/90 text-slate-800 shadow-sky-100/60'
-            : 'bg-gradient-to-b from-slate-950 via-indigo-950/20 to-slate-950 border-indigo-500/30 text-indigo-200 shadow-black'
-        }`}
-      >
-        <div className="flex items-center justify-between text-[11px] pb-1.5 border-b border-indigo-500/20">
-          <div className="flex items-center gap-1.5 font-bold tracking-wider">
-            <Tv className="w-3.5 h-3.5 text-indigo-500 animate-pulse" />
-            <span className={isLight ? 'text-indigo-950' : 'text-indigo-200'}>
-              SMART TV BOX & STREAMING
-            </span>
-          </div>
-
-          <span
-            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-              power
-                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 border border-emerald-500/40'
-                : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
-            }`}
-          >
-            {power ? 'ONLINE' : 'STANDBY'}
-          </span>
-        </div>
-
-        {power ? (
-          <div className="pt-2 flex items-center justify-between">
-            <div>
-              <div className="text-[10px] text-slate-400 font-sans uppercase">Aplicativo Atual</div>
-              <div className="text-sm font-black text-indigo-600 dark:text-indigo-400">
-                {activeApp}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 text-[10px] bg-indigo-50 dark:bg-indigo-950/50 px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800">
-              <Sparkles className="w-3 h-3 text-amber-500" />
-              <span>4K HDR Ultra</span>
-            </div>
-          </div>
-        ) : (
-          <div className="py-3 text-center text-slate-500 text-xs font-mono">
-            SMART BOX EM ESPERA
-          </div>
-        )}
-      </div>
-
       {/* TOP FUNCTION BAR (POWER, SEARCH/VOICE, MENU, MUTE) */}
       <div className="w-full grid grid-cols-4 gap-2">
         <button
