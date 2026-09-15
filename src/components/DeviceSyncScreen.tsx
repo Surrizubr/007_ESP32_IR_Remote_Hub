@@ -17,6 +17,7 @@ import { esp32 } from '../services/esp32Service';
 import { feedback } from '../services/soundService';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import { BluetoothConnectionCard, WiFiScanCard } from './BluetoothPairingPanel';
 
 interface DeviceSyncScreenProps {
   espState: ESP32DeviceState;
@@ -131,6 +132,12 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
         </div>
       )}
 
+      {/* ── Quadro 1: Conexão Bluetooth ─────────────────────── */}
+      <BluetoothConnectionCard />
+
+      {/* ── Quadro 2: Busca de Rede WiFi ────────────────────── */}
+      <WiFiScanCard />
+
       {/* ── Status Card ──────────────────────────────────────── */}
       <div className={`rounded-[32px] p-6 shadow-2xl border transition-all ${
         isLight
@@ -194,6 +201,8 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           </div>
         </div>
       </div>
+
+
 
       {/* ── Instrução WiFi ───────────────────────────────────── */}
       <div className={`rounded-[28px] p-5 border flex items-start gap-4 ${
