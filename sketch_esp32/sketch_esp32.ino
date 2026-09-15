@@ -50,11 +50,10 @@ bool credentialsReceived = false;
 String newSsid = "";
 String newPass = "";
 
-// ─── Touch Pin (Touch9 = GPIO32) ─────────────────────────────
-const int PIN_TOUCH      = 32;
-unsigned long touchStartTime = 0;
-bool isTouching          = false;
-const int TOUCH_THRESHOLD = 40;
+// ─── Botão Push Button (GPIO27 = INPUT_PULLUP) ──────────────
+const int PIN_BUTTON      = 27;
+unsigned long buttonPressTime = 0;
+bool isButtonPressed      = false;
 
 // ─── Credenciais WiFi (preencha aqui) ─────────────────────────
 const char* WIFI_SSID = "SEU_SSID_AQUI";
@@ -62,9 +61,10 @@ const char* WIFI_PASS = "SUA_SENHA_AQUI";
 // ──────────────────────────────────────────────────────────────
 
 // --- Configuração de pinos ---
-const int PIN_IR_RECV = 15;
-const int PIN_IR_SEND = 4;
-const int PIN_LED     = 2; // LED onboard (azul)
+const int PIN_IR_RECV    = 4;
+const int PIN_IR_SEND    = 32;
+const int PIN_LED        = 2;  // LED onboard (azul)
+const int PIN_STATUS_LED = 25; // LED de status externo
 
 // --- Instâncias IR ---
 IRsend irsend(PIN_IR_SEND);
@@ -96,8 +96,12 @@ struct IRReceived {
 SemaphoreHandle_t irRxMutex;
 IRReceived latestRxSignal = {"", "", 0, false};
 
-// --- Estado do LED ---
+// --- Estado do LED onboard ---
 unsigned long lastHeartbeat = 0;
+
+// --- Estado do LED de status (GPIO 25) ---
+unsigned long lastStatusLed  = 0;
+bool          statusLedState = false;
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers
@@ -119,6 +123,42 @@ void handleHeartbeat() {
       digitalWrite(PIN_LED, !digitalRead(PIN_LED));
       lastHeartbeat = now;
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  LED de Status (GPIO 25)
+//  Padrões de piscamento:
+//   · WiFi conectado        → 1 pulso curto a cada 3 s
+//   · WiFi conectando       → pisca 250 ms
+//   · BLE aguardando device → pisca 100 ms (muito rápido)
+//   · BLE device conectado  → pisca 500 ms
+// ─────────────────────────────────────────────────────────────
+void handleStatusLED() {
+  unsigned long now      = millis();
+  unsigned long interval = 0;
+
+  if (currentMode == MODE_WIFI) {
+    if (WiFi.status() == WL_CONNECTED) {
+      // Pulso rápido (30 ms) a cada 3 s — WiFi ok
+      if (now - lastStatusLed >= 3000) {
+        digitalWrite(PIN_STATUS_LED, HIGH);
+        delay(30);
+        digitalWrite(PIN_STATUS_LED, LOW);
+        lastStatusLed = now;
+      }
+      return; // saída antecipada: o pulso já foi feito acima
+    } else {
+      interval = 250; // WiFi conectando: pisca rápido
+    }
+  } else { // MODE_BLE
+    interval = deviceConnected ? 500UL : 100UL;
+  }
+
+  if (now - lastStatusLed >= interval) {
+    statusLedState = !statusLedState;
+    digitalWrite(PIN_STATUS_LED, statusLedState ? HIGH : LOW);
+    lastStatusLed = now;
   }
 }
 
@@ -436,6 +476,7 @@ void processBLE() {
     Serial.println("[BLE] Salvando credenciais na NVS e reiniciando...");
     Preferences prefs;
     prefs.begin("wifi_cfg", false);
+    prefs.clear(); // Apaga credenciais antigas antes de salvar as novas
     prefs.putString("ssid", newSsid);
     prefs.putString("pass", newPass);
     prefs.end();
@@ -465,6 +506,8 @@ void processBLE() {
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
 
   Serial.println("\n==============================");
   Serial.println("  ESP32 IR HUB v7.1.0 WiFi+BLE");
@@ -530,21 +573,21 @@ void setup() {
 // ─────────────────────────────────────────────────────────────
 
 void loop() {
-  // Lida com touch9 (GPIO 32)
-  int tVal = touchRead(PIN_TOUCH);
-  if (tVal < TOUCH_THRESHOLD) {
-    if (!isTouching) {
-      isTouching = true;
-      touchStartTime = millis();
-    } else if (millis() - touchStartTime > 1000) {
-      // Segurou por >1s → ativa modo BLE
+  // Botão push button (GPIO 27 = INPUT_PULLUP → LOW quando pressionado)
+  bool btnPressed = (digitalRead(PIN_BUTTON) == LOW);
+  if (btnPressed) {
+    if (!isButtonPressed) {
+      isButtonPressed = true;
+      buttonPressTime = millis();
+    } else if (millis() - buttonPressTime >= 2000) {
+      // Segurou por ≥2s → ativa modo BLE
       if (currentMode == MODE_WIFI) {
         startBLEMode();
       }
-      isTouching = false; // reset para não ficar disparando
+      isButtonPressed = false; // reset para não ficar disparando
     }
   } else {
-    isTouching = false;
+    isButtonPressed = false;
   }
 
   if (currentMode == MODE_WIFI) {
@@ -573,6 +616,9 @@ void loop() {
       lastHeartbeat = now;
     }
   }
+
+  // LED de status: sempre ativo, independente do modo
+  handleStatusLED();
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
 }
