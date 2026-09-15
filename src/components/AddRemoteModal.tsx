@@ -61,6 +61,18 @@ export const AddRemoteModal: React.FC<AddRemoteModalProps> = ({
       badge: 'TV / Smart TV',
     },
     {
+      type: 'tv_white',
+      label: language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)',
+      description: language === 'pt'
+        ? 'Controle estilo LG com fundo branco, Netflix, Amazon Prime, teclado numérico e teclas coloridas'
+        : language === 'es'
+        ? 'Control estilo LG con fondo blanco, Netflix, Amazon Prime, teclado numérico y teclas de colores'
+        : 'LG style remote with white background, Netflix, Amazon Prime, numeric keypad and color keys',
+      icon: Tv,
+      color: 'from-amber-500/20 to-orange-500/20 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800',
+      badge: 'LG / Smart TV',
+    },
+    {
       type: 'ac',
       label: language === 'pt' ? 'Ar Condicionado' : language === 'es' ? 'Aire Acondicionado' : 'Air Conditioner',
       description: language === 'pt'

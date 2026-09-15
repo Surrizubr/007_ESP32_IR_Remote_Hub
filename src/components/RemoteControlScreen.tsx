@@ -45,9 +45,11 @@ import { SmartBoxRemote } from './remotes/SmartBoxRemote';
 import { ProjectorRemote } from './remotes/ProjectorRemote';
 import { AddRemoteModal } from './AddRemoteModal';
 import { ManageRemotesModal } from './ManageRemotesModal';
+import { WhiteTvRemote } from './remotes/WhiteTvRemote';
 
 export type RemoteDeviceType =
   | 'tv'
+  | 'tv_white'
   | 'ac'
   | 'sound'
   | 'lights'
@@ -114,7 +116,7 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
   // Check if current remote is a system default
   const isCurrentDefault = Boolean(
     currentRemote.isDefault ||
-    ['tv', 'ac', 'sound', 'lights', 'smartbox', 'projector', 'custom'].includes(currentRemote.id)
+    ['tv', 'tv_white', 'ac', 'sound', 'lights', 'smartbox', 'projector', 'custom'].includes(currentRemote.id)
   );
 
   const activeLayout = currentRemote.layoutType;
@@ -146,6 +148,7 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
       case 'custom':
         return Sliders;
       case 'tv':
+      case 'tv_white':
       default:
         return Tv;
     }
@@ -156,6 +159,8 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
     switch (remote.layoutType) {
       case 'tv':
         return language === 'pt' ? 'Televisão' : language === 'es' ? 'Televisión' : 'Television';
+      case 'tv_white':
+        return language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)';
       case 'ac':
         return language === 'pt' ? 'Ar Condicionado' : language === 'es' ? 'Aire Acondicionado' : 'Air Conditioner';
       case 'sound':
@@ -180,6 +185,10 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
       if (specificVal) {
         return Array.isArray(specificVal) ? specificVal : [specificVal];
       }
+    }
+    const exactVal = buttonMappings[buttonKey];
+    if (exactVal) {
+      return Array.isArray(exactVal) ? exactVal : [exactVal];
     }
     const defaultVal = buttonMappings[buttonKey];
     if (defaultVal) {
@@ -1421,6 +1430,18 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
               </div>
             </div>
           </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 2.5: TV SMART BRANCO (ESTILO LG) REMOTE */}
+        {/* ========================================================================= */}
+        {activeLayout === 'tv_white' && (
+          <WhiteTvRemote
+            isLight={isLight}
+            isConfigMode={isConfigMode}
+            getMappedCommand={getMappedCommand}
+            onButtonClick={handleButtonClick}
+          />
         )}
 
         {/* ========================================================================= */}

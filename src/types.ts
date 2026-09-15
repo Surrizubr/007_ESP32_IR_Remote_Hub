@@ -109,6 +109,7 @@ export interface ActivityLogItem {
 
 export type RemoteLayoutType =
   | 'tv'
+  | 'tv_white'
   | 'decoder'
   | 'ac'
   | 'fan'

@@ -61,6 +61,7 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
   const getLayoutIcon = (type: RemoteLayoutType) => {
     switch (type) {
       case 'tv':
+      case 'tv_white':
         return Tv;
       case 'ac':
         return AirVent;
@@ -82,6 +83,8 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
     switch (type) {
       case 'tv':
         return language === 'pt' ? 'Televisão' : language === 'es' ? 'Televisión' : 'Television';
+      case 'tv_white':
+        return language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)';
       case 'ac':
         return language === 'pt' ? 'Ar Condicionado' : language === 'es' ? 'Aire Acondicionado' : 'Air Conditioner';
       case 'sound':
@@ -353,6 +356,7 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
                   }`}
                 >
                   <option value="tv">{language === 'pt' ? 'Televisão (TV / Smart TV)' : language === 'es' ? 'Televisión (TV / Smart TV)' : 'Television (TV / Smart TV)'}</option>
+                  <option value="tv_white">{language === 'pt' ? 'TV Smart Branco (Estilo LG)' : language === 'es' ? 'TV Smart Blanco (Estilo LG)' : 'Smart TV White (LG Style)'}</option>
                   <option value="ac">{language === 'pt' ? 'Ar Condicionado (Climatização)' : language === 'es' ? 'Aire Acondicionado (Clima)' : 'Air Conditioner (Climate)'}</option>
                   <option value="sound">{language === 'pt' ? 'Aparelho de Som (Audio / Receiver)' : language === 'es' ? 'Equipo de Sonido (Audio / Receiver)' : 'Sound System (Audio / Receiver)'}</option>
                   <option value="lights">{language === 'pt' ? 'Luminárias (RGB & LED)' : language === 'es' ? 'Luminarias (RGB & LED)' : 'Lights (RGB & LED)'}</option>

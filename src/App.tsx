@@ -60,7 +60,11 @@ function MainApp() {
       const saved = localStorage.getItem(STORAGE_KEYS.COMMANDS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const existingIds = new Set(parsed.map((c: IRCommand) => c.id));
+          const missingDefaults = DEFAULT_IR_COMMANDS.filter((dc) => !existingIds.has(dc.id));
+          return [...parsed, ...missingDefaults];
+        }
       }
     } catch (e) {
       console.warn('Error loading commands from storage:', e);
@@ -71,7 +75,10 @@ function MainApp() {
   const [buttonMappings, setButtonMappings] = useState<Record<string, string | string[]>>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.BUTTON_MAPPINGS);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_BUTTON_MAPPINGS, ...parsed };
+      }
     } catch (e) {
       console.warn('Error loading button mappings from storage:', e);
     }
@@ -98,10 +105,15 @@ function MainApp() {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const defaultIds = new Set(DEFAULT_REMOTES.map((r) => r.id));
-          return parsed.map((r: RemoteDevice) => ({
-            ...r,
-            isDefault: r.isDefault ?? defaultIds.has(r.id),
-          }));
+          const existingIds = new Set(parsed.map((r: RemoteDevice) => r.id));
+          const missingDefaults = DEFAULT_REMOTES.filter((dr) => !existingIds.has(dr.id));
+          return [
+            ...parsed.map((r: RemoteDevice) => ({
+              ...r,
+              isDefault: r.isDefault ?? defaultIds.has(r.id),
+            })),
+            ...missingDefaults,
+          ];
         }
       }
     } catch (e) {
