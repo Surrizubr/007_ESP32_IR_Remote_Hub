@@ -31,11 +31,8 @@
 #define CHAR_WIFI_CREDS_UUID   "22222222-1234-1234-1234-123456789012"
 #define CHAR_STATUS_UUID       "33333333-1234-1234-1234-123456789012"
 
-// ─── BLE Timeout de Pareamento ──────────────────────────────
-// Se nenhum dispositivo conectar dentro deste período, o ESP32
-// encerra o modo BLE e reinicia no modo WiFi com as credenciais salvas.
-const unsigned long BLE_PAIRING_TIMEOUT_MS = 60000UL; // 60 segundos
-
+// ─── BLE Pareamento ──────────────────────────────────────────
+// O ESP32 permanece em modo BLE indefinidamente até que receba credenciais válidas.
 unsigned long bleStartTime    = 0;
 volatile bool shouldDoWifiScan = false; // flag thread-safe para scan on-demand
 
@@ -310,6 +307,8 @@ void taskWebServer(void* pvParameters) {
 // ─────────────────────────────────────────────────────────────
 
 void taskIR(void* pvParameters) {
+  pinMode(PIN_IR_RECV, INPUT_PULLUP);
+  irrecv.setUnknownThreshold(12); // Exige no mínimo 12 transições para considerar ruído UNKNOWN
   irrecv.enableIRIn();
   irsend.begin();
 
@@ -340,26 +339,41 @@ void taskIR(void* pvParameters) {
       digitalWrite(PIN_LED, LOW);
     }
 
-    // Receber sinais IR
+    // Receber sinais IR com filtro anti-ruído (RF Wi-Fi, ripple de fonte e luz ambiente)
     if (irrecv.decode(&irResults)) {
-      digitalWrite(PIN_LED, HIGH);
+      bool isNoise = false;
 
-      String protocol = typeToString(irResults.decode_type);
-      char hexStr[20];
-      sprintf(hexStr, "0x%llX", irResults.value);
+      // 1) Sinais UNKNOWN: descarta se tiver poucas transições (glitches elétricos) ou valor zerado
+      if (irResults.decode_type == UNKNOWN) {
+        if (irResults.rawlen < 14 || irResults.value == 0) {
+          isNoise = true;
+        }
+      } else if (irResults.bits == 0 || irResults.value == 0) {
+        // 2) Sinais decodificados mas com 0 bits ou valor 0 são ruídos
+        isNoise = true;
+      }
 
-      Serial.printf("[IR RX] %s %s (%d bits)\n", protocol.c_str(), hexStr, irResults.bits);
+      if (!isNoise) {
+        digitalWrite(PIN_LED, HIGH);
 
-      // Salva no buffer para polling HTTP
-      xSemaphoreTake(irRxMutex, portMAX_DELAY);
-      strlcpy(latestRxSignal.protocol, protocol.c_str(), sizeof(latestRxSignal.protocol));
-      strlcpy(latestRxSignal.hex, hexStr, sizeof(latestRxSignal.hex));
-      latestRxSignal.bits   = irResults.bits;
-      latestRxSignal.hasNew = true;
-      xSemaphoreGive(irRxMutex);
+        String protocol = typeToString(irResults.decode_type);
+        char hexStr[20];
+        sprintf(hexStr, "0x%llX", irResults.value);
 
-      delay(100);
-      digitalWrite(PIN_LED, LOW);
+        Serial.printf("[IR RX Valido] %s %s (%d bits)\n", protocol.c_str(), hexStr, irResults.bits);
+
+        // Salva no buffer para polling HTTP
+        xSemaphoreTake(irRxMutex, portMAX_DELAY);
+        strlcpy(latestRxSignal.protocol, protocol.c_str(), sizeof(latestRxSignal.protocol));
+        strlcpy(latestRxSignal.hex, hexStr, sizeof(latestRxSignal.hex));
+        latestRxSignal.bits   = irResults.bits;
+        latestRxSignal.hasNew = true;
+        xSemaphoreGive(irRxMutex);
+
+        delay(80);
+        digitalWrite(PIN_LED, LOW);
+      }
+
       irrecv.resume();
     }
 
@@ -422,10 +436,17 @@ class MyCredsCallbacks: public BLECharacteristicCallbacks {
 
 void startBLEMode() {
   Serial.println("[BLE] Iniciando modo Bluetooth...");
-  currentMode      = MODE_BLE;
-  bleStartTime     = millis();
+  currentMode         = MODE_BLE;
+  bleStartTime        = millis();
   credentialsReceived = false;
   shouldDoWifiScan    = false;
+
+  // Apaga as credenciais WiFi anteriores da memória flash NVS
+  Preferences prefs;
+  prefs.begin("wifi_cfg", false);
+  prefs.clear();
+  prefs.end();
+  Serial.println("[BLE] Credenciais WiFi anteriores apagadas da memoria flash (NVS).");
 
   // Desconecta do WiFi mas mantém o rádio ativo no modo STA para scan posterior
   WiFi.disconnect(true, false);
@@ -466,7 +487,7 @@ void startBLEMode() {
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  Serial.println("[BLE] Modo pareamento ativo. Timeout: 60s");
+  Serial.println("[BLE] Modo pareamento ativo indefinidamente aguardando credenciais.");
 }
 
 void processBLE() {
@@ -489,14 +510,6 @@ void processBLE() {
     shouldDoWifiScan = false;
     doWifiScanAndNotify();
   }
-
-  // 3) Timeout: nenhum dispositivo pareou em 60s → volta ao WiFi
-  if (!deviceConnected && (millis() - bleStartTime > BLE_PAIRING_TIMEOUT_MS)) {
-    Serial.println("[BLE] Timeout de 60s sem pareamento. Reiniciando no modo WiFi...");
-    Serial.println("[BLE] O ESP32 usará as credenciais salvas na NVS (ou as hardcoded).");
-    delay(200);
-    ESP.restart(); // Reinicia: setup() tentará as credenciais NVS ou hardcoded
-  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -508,6 +521,7 @@ void setup() {
   pinMode(PIN_LED, OUTPUT);
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_IR_RECV, INPUT_PULLUP);
 
   Serial.println("\n==============================");
   Serial.println("  ESP32 IR HUB v7.1.0 WiFi+BLE");
@@ -517,7 +531,10 @@ void setup() {
   irTxQueue = xQueueCreate(20, sizeof(IRCommand));
   irRxMutex = xSemaphoreCreateMutex();
 
-  // Verificar credenciais salvas em NVS (fallback)
+  // Iniciar task IR (Core 1)
+  xTaskCreatePinnedToCore(taskIR, "IRTask", 4096, NULL, 2, NULL, 1);
+
+  // Verificar credenciais salvas em NVS
   Preferences prefs;
   prefs.begin("wifi_cfg", true);
   String savedSsid = prefs.getString("ssid", "");
@@ -527,11 +544,21 @@ void setup() {
   String ssidToUse = WIFI_SSID;
   String passToUse = WIFI_PASS;
 
-  if (ssidToUse == "SEU_SSID_AQUI" && savedSsid.length() > 0) {
+  if (ssidToUse == "SEU_SSID_AQUI") {
     ssidToUse = savedSsid;
     passToUse = savedPass;
-    Serial.printf("[WiFi] Usando rede salva na memoria: \"%s\"\n", ssidToUse.c_str());
   }
+
+  // Caso o usuário ligue o ESP32 sem nenhuma credencial salva, entra direto em modo BLE
+  if (ssidToUse.length() == 0 || ssidToUse == "SEU_SSID_AQUI") {
+    Serial.println("[WiFi] Nenhuma credencial WiFi configurada ou salva.");
+    Serial.println("[BLE] Entrando automaticamente em modo de pareamento Bluetooth...");
+    startBLEMode();
+    Serial.println("[Setup] Modo BLE ativo aguardando novas credenciais.");
+    return;
+  }
+
+  Serial.printf("[WiFi] Usando rede configurada: \"%s\"\n", ssidToUse.c_str());
 
   // Conectar ao WiFi
   WiFi.mode(WIFI_STA);
@@ -561,9 +588,8 @@ void setup() {
     Serial.println("[mDNS] Hostname: esp32-ir-hub.local");
   }
 
-  // Criar tasks FreeRTOS
+  // Criar task WebServer (Core 0)
   xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(taskIR,        "IRTask",        4096, NULL, 2, NULL, 1);
 
   Serial.println("[Setup] Pronto!");
 }

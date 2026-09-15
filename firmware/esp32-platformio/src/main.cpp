@@ -1,13 +1,13 @@
 /*
- * ESP32 IR HUB - Firmware v7.0.0 BLE
- * Modo: WiFi + Bluetooth Low Energy
- * Comunicação: HTTP REST sobre WiFi (mesma rede local) ou BLE para pareamento
- * Features: mDNS, IR Transmit, IR Receive (polling), Heartbeat LED, BLE Pairing Mode
+ * ESP32 IR HUB - Firmware v7.1.0
+ * Modos: WiFi + BLE Provisioning
+ * Comunicação: HTTP REST sobre WiFi (mesma rede local)
+ * Features: mDNS, IR Transmit, IR Receive (polling), Heartbeat LED,
+ *           BLE Provisioning WiFi com timeout de 60s
  *
  * ─────────────────────────────────────────────────────────────
  *  CONFIGURAÇÃO: preencha o SSID e a senha da sua rede WiFi.
  *  Se deixar "SEU_SSID_AQUI", ele tentará usar credenciais salvas na NVS.
- *  Segure Touch9 (GPIO 32) por 1+ segundo para ativar modo de pareamento BLE.
  * ─────────────────────────────────────────────────────────────
  */
 
@@ -25,32 +25,43 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
+// ─── BLE Config ─────────────────────────────────────────────
+#define SERVICE_UUID           "12345678-1234-1234-1234-123456789012"
+#define CHAR_WIFI_SCAN_UUID    "11111111-1234-1234-1234-123456789012"
+#define CHAR_WIFI_CREDS_UUID   "22222222-1234-1234-1234-123456789012"
+#define CHAR_STATUS_UUID       "33333333-1234-1234-1234-123456789012"
+
+// ─── BLE Pareamento ──────────────────────────────────────────
+// O ESP32 permanece em modo BLE indefinidamente até que receba credenciais válidas.
+unsigned long bleStartTime    = 0;
+volatile bool shouldDoWifiScan = false; // flag thread-safe para scan on-demand
+
+enum SystemMode { MODE_WIFI, MODE_BLE };
+SystemMode currentMode = MODE_WIFI;
+
+BLEServer          *pServer    = NULL;
+BLECharacteristic  *pCharScan  = NULL;
+BLECharacteristic  *pCharStatus= NULL;
+bool deviceConnected     = false;
+bool credentialsReceived = false;
+String newSsid = "";
+String newPass = "";
+
+// ─── Botão Push Button (GPIO27 = INPUT_PULLUP) ──────────────
+const int PIN_BUTTON      = 27;
+unsigned long buttonPressTime = 0;
+bool isButtonPressed      = false;
+
 // ─── Credenciais WiFi (preencha aqui) ─────────────────────────
 const char* WIFI_SSID = "SEU_SSID_AQUI";
 const char* WIFI_PASS = "SUA_SENHA_AQUI";
 // ──────────────────────────────────────────────────────────────
 
 // --- Configuração de pinos ---
-const int PIN_IR_RECV   = 15;
-const int PIN_IR_SEND   = 4;
-const int PIN_LED       = 2;  // LED onboard (azul)
-const int PIN_TOUCH9    = 32; // Touch sensor para modo de pareamento
-
-// --- UUID BLE Service and Characteristics ---
-#define SERVICE_UUID "12345678-1234-1234-1234-123456789012"
-#define CHAR_WIFI_SCAN_UUID "11111111-1234-1234-1234-123456789012"
-#define CHAR_WIFI_CREDS_UUID "22222222-1234-1234-1234-123456789012"
-#define CHAR_STATUS_UUID "33333333-1234-1234-1234-123456789012"
-
-// --- Variáveis de estado BLE ---
-bool bleEnabled = false;
-bool bleConnected = false;
-BLEServer* pServer = nullptr;
-BLEService* pService = nullptr;
-BLECharacteristic* pCharWiFiScan = nullptr;
-BLECharacteristic* pCharWiFiCreds = nullptr;
-BLECharacteristic* pCharStatus = nullptr;
-SemaphoreHandle_t bleMutex = nullptr;
+const int PIN_IR_RECV    = 4;
+const int PIN_IR_SEND    = 32;
+const int PIN_LED        = 2;  // LED onboard (azul)
+const int PIN_STATUS_LED = 25; // LED de status externo
 
 // --- Instâncias IR ---
 IRsend irsend(PIN_IR_SEND);
@@ -82,199 +93,12 @@ struct IRReceived {
 SemaphoreHandle_t irRxMutex;
 IRReceived latestRxSignal = {"", "", 0, false};
 
-// --- Estado do LED ---
+// --- Estado do LED onboard ---
 unsigned long lastHeartbeat = 0;
 
-// ─────────────────────────────────────────────────────────────
-//  BLE Callbacks
-// ─────────────────────────────────────────────────────────────
-
-class BLEServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* pServer, esp_ble_gatts_cb_param_t* param) override {
-    bleConnected = true;
-    Serial.println("[BLE] Cliente conectado!");
-    digitalWrite(PIN_LED, HIGH);
-  }
-
-  void onDisconnect(BLEServer* pServer) override {
-    bleConnected = false;
-    Serial.println("[BLE] Cliente desconectado");
-    if (bleEnabled) {
-      // Restart advertising after disconnect
-      BLEDevice::startAdvertising();
-    }
-  }
-};
-
-class BLECharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* pCharacteristic) override {
-    String value = pCharacteristic->getValue();
-    
-    if (pCharacteristic == pCharWiFiCreds && value.length() > 0) {
-      // Esperamos um JSON: {"ssid":"...", "password":"..."}
-      JsonDocument doc;
-      DeserializationError err = deserializeJson(doc, value);
-      
-      if (!err && doc.containsKey("ssid") && doc.containsKey("password")) {
-        String ssid = doc["ssid"];
-        String password = doc["password"];
-        
-        Serial.printf("[BLE] Recebidas credenciais: SSID=%s\n", ssid.c_str());
-        
-        // Salvar em NVS
-        Preferences prefs;
-        prefs.begin("wifi_cfg", false);
-        prefs.putString("ssid", ssid);
-        prefs.putString("pass", password);
-        prefs.end();
-        
-        // Enviar confirmação
-        String response = "{\"status\":\"received\"}";
-        pCharStatus->setValue(response);
-        pCharStatus->notify();
-        
-        Serial.println("[BLE] Credenciais salvas. Desconectando BLE e reconectando WiFi...");
-        delay(500);
-        
-        // Desabilitar BLE
-        if (pServer) {
-          pServer->getAdvertising()->stop();
-          BLEDevice::deinit(true);
-          bleEnabled = false;
-          Serial.println("[BLE] BLE desabilitado");
-        }
-        
-        // Reconectar WiFi
-        WiFi.disconnect(true);
-        delay(500);
-        WiFi.begin(ssid.c_str(), password.c_str());
-        Serial.printf("[WiFi] Reconectando com novas credenciais: %s\n", ssid.c_str());
-      }
-    }
-  }
-};
-
-// ─────────────────────────────────────────────────────────────
-//  Função para inicializar BLE
-// ─────────────────────────────────────────────────────────────
-
-void initBLE() {
-  if (bleEnabled) return;
-  
-  Serial.println("\n[BLE] Inicializando Bluetooth Low Energy...");
-  
-  BLEDevice::init("ESP32-IR-Hub");
-  pServer = BLEDevice::createServer();
-  pServer->setCallbacks(new BLEServerCallbacks());
-  
-  pService = pServer->createService(SERVICE_UUID);
-  
-  // Característica: WiFi Scan Results (notificável)
-  pCharWiFiScan = pService->createCharacteristic(
-    CHAR_WIFI_SCAN_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
-  );
-  pCharWiFiScan->addDescriptor(new BLE2902());
-  
-  // Característica: WiFi Credentials (escrita)
-  pCharWiFiCreds = pService->createCharacteristic(
-    CHAR_WIFI_CREDS_UUID,
-    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_READ
-  );
-  pCharWiFiCreds->setCallbacks(new BLECharacteristicCallbacks());
-  
-  // Característica: Status (notificável)
-  pCharStatus = pService->createCharacteristic(
-    CHAR_STATUS_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
-  );
-  pCharStatus->addDescriptor(new BLE2902());
-  
-  pService->start();
-  
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  
-  bleEnabled = true;
-  Serial.println("[BLE] BLE inicializado e anunciando!");
-  Serial.println("[BLE] Aguardando conexão do app...");
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Função para escanear WiFi (via BLE)
-// ─────────────────────────────────────────────────────────────
-
-void scanWiFiBLE() {
-  Serial.println("[WiFi] Iniciando varredura de redes...");
-  
-  int n = WiFi.scanNetworks();
-  JsonDocument doc;
-  JsonArray networks = doc.createNestedArray("networks");
-  
-  for (int i = 0; i < n; ++i) {
-    JsonObject net = networks.createNestedObject();
-    net["ssid"] = WiFi.SSID(i);
-    net["rssi"] = WiFi.RSSI(i);
-    net["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-  }
-  
-  String result;
-  serializeJson(doc, result);
-  
-  if (pCharWiFiScan && bleConnected) {
-    pCharWiFiScan->setValue(result);
-    pCharWiFiScan->notify();
-    Serial.printf("[BLE] Enviadas %d redes WiFi disponíveis\n", n);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Task para detectar Touch9 e gerenciar modo de pareamento
-// ─────────────────────────────────────────────────────────────
-
-void taskTouchDetection(void* pvParameters) {
-  unsigned long touchPressStart = 0;
-  bool touchPressed = false;
-  
-  for (;;) {
-    // Ler status do Touch9 (GPIO 32)
-    bool touchRead = touchRead(PIN_TOUCH9) > 20; // Threshold típico
-    
-    if (touchRead && !touchPressed) {
-      // Toque iniciado
-      touchPressStart = millis();
-      touchPressed = true;
-      Serial.println("[Touch] Sensor tocado...");
-    } else if (!touchRead && touchPressed) {
-      // Toque liberado
-      unsigned long pressDuration = millis() - touchPressStart;
-      touchPressed = false;
-      
-      if (pressDuration >= 1000) {
-        Serial.printf("[Touch] Pressionado por %lu ms - Ativando modo de pareamento BLE!\n", pressDuration);
-        
-        // Desconectar WiFi temporariamente
-        WiFi.disconnect(true);
-        delay(500);
-        
-        // Inicializar BLE
-        if (!bleEnabled) {
-          initBLE();
-          
-          // Enviar sinal para escanear WiFi
-          delay(500);
-          scanWiFiBLE();
-        }
-      }
-    }
-    
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-  }
-}
+// --- Estado do LED de status (GPIO 25) ---
+unsigned long lastStatusLed  = 0;
+bool          statusLedState = false;
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers
@@ -300,19 +124,82 @@ void handleHeartbeat() {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  LED de Status (GPIO 25)
+//  Padrões de piscamento:
+//   · WiFi conectado        → 1 pulso curto a cada 3 s
+//   · WiFi conectando       → pisca 250 ms
+//   · BLE aguardando device → pisca 100 ms (muito rápido)
+//   · BLE device conectado  → pisca 500 ms
+// ─────────────────────────────────────────────────────────────
+void handleStatusLED() {
+  unsigned long now      = millis();
+  unsigned long interval = 0;
+
+  if (currentMode == MODE_WIFI) {
+    if (WiFi.status() == WL_CONNECTED) {
+      // Pulso rápido (30 ms) a cada 3 s — WiFi ok
+      if (now - lastStatusLed >= 3000) {
+        digitalWrite(PIN_STATUS_LED, HIGH);
+        delay(30);
+        digitalWrite(PIN_STATUS_LED, LOW);
+        lastStatusLed = now;
+      }
+      return; // saída antecipada: o pulso já foi feito acima
+    } else {
+      interval = 250; // WiFi conectando: pisca rápido
+    }
+  } else { // MODE_BLE
+    interval = deviceConnected ? 500UL : 100UL;
+  }
+
+  if (now - lastStatusLed >= interval) {
+    statusLedState = !statusLedState;
+    digitalWrite(PIN_STATUS_LED, statusLedState ? HIGH : LOW);
+    lastStatusLed = now;
+  }
+}
+
+// Realiza scan WiFi e notifica resultado via BLE
+void doWifiScanAndNotify() {
+  Serial.println("[BLE] Realizando scan de redes WiFi...");
+
+  // Garante que o rádio WiFi está em modo STA para poder escanear
+  WiFi.mode(WIFI_STA);
+  int n = WiFi.scanNetworks();
+
+  JsonDocument doc;
+  JsonArray networks = doc["networks"].to<JsonArray>();
+  for (int i = 0; i < n; ++i) {
+    JsonObject net = networks.add<JsonObject>();
+    net["ssid"]   = WiFi.SSID(i);
+    net["rssi"]   = WiFi.RSSI(i);
+    net["secure"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+  }
+
+  String out;
+  serializeJson(doc, out);
+  Serial.printf("[BLE] Scan concluído: %d rede(s) encontrada(s)\n", n);
+
+  if (pCharScan && deviceConnected) {
+    pCharScan->setValue(out.c_str());
+    pCharScan->notify();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Handlers HTTP
 // ─────────────────────────────────────────────────────────────
 
 // GET /
 void handleRoot() {
-  server.send(200, "text/plain", "ESP32 IR HUB v7.0.0 WiFi-Only Online");
+  server.send(200, "text/plain", "ESP32 IR HUB v7.1.0 WiFi+BLE Online");
 }
 
 // GET /api/status
 void handleStatus() {
   JsonDocument doc;
   doc["status"]    = "online";
-  doc["firmware"]  = "7.0.0";
+  doc["firmware"]  = "7.1.0";
   doc["wifi_mac"]  = WiFi.macAddress();
   doc["ip"]        = WiFi.localIP().toString();
   doc["rssi"]      = WiFi.RSSI();
@@ -420,6 +307,8 @@ void taskWebServer(void* pvParameters) {
 // ─────────────────────────────────────────────────────────────
 
 void taskIR(void* pvParameters) {
+  pinMode(PIN_IR_RECV, INPUT_PULLUP);
+  irrecv.setUnknownThreshold(12); // Exige no mínimo 12 transições para considerar ruído UNKNOWN
   irrecv.enableIRIn();
   irsend.begin();
 
@@ -450,30 +339,176 @@ void taskIR(void* pvParameters) {
       digitalWrite(PIN_LED, LOW);
     }
 
-    // Receber sinais IR
+    // Receber sinais IR com filtro anti-ruído (RF Wi-Fi, ripple de fonte e luz ambiente)
     if (irrecv.decode(&irResults)) {
-      digitalWrite(PIN_LED, HIGH);
+      bool isNoise = false;
 
-      String protocol = typeToString(irResults.decode_type);
-      char hexStr[20];
-      sprintf(hexStr, "0x%llX", irResults.value);
+      // 1) Sinais UNKNOWN: descarta se tiver poucas transições (glitches elétricos) ou valor zerado
+      if (irResults.decode_type == UNKNOWN) {
+        if (irResults.rawlen < 14 || irResults.value == 0) {
+          isNoise = true;
+        }
+      } else if (irResults.bits == 0 || irResults.value == 0) {
+        // 2) Sinais decodificados mas com 0 bits ou valor 0 são ruídos
+        isNoise = true;
+      }
 
-      Serial.printf("[IR RX] %s %s (%d bits)\n", protocol.c_str(), hexStr, irResults.bits);
+      if (!isNoise) {
+        digitalWrite(PIN_LED, HIGH);
 
-      // Salva no buffer para polling HTTP
-      xSemaphoreTake(irRxMutex, portMAX_DELAY);
-      strlcpy(latestRxSignal.protocol, protocol.c_str(), sizeof(latestRxSignal.protocol));
-      strlcpy(latestRxSignal.hex, hexStr, sizeof(latestRxSignal.hex));
-      latestRxSignal.bits   = irResults.bits;
-      latestRxSignal.hasNew = true;
-      xSemaphoreGive(irRxMutex);
+        String protocol = typeToString(irResults.decode_type);
+        char hexStr[20];
+        sprintf(hexStr, "0x%llX", irResults.value);
 
-      delay(100);
-      digitalWrite(PIN_LED, LOW);
+        Serial.printf("[IR RX Valido] %s %s (%d bits)\n", protocol.c_str(), hexStr, irResults.bits);
+
+        // Salva no buffer para polling HTTP
+        xSemaphoreTake(irRxMutex, portMAX_DELAY);
+        strlcpy(latestRxSignal.protocol, protocol.c_str(), sizeof(latestRxSignal.protocol));
+        strlcpy(latestRxSignal.hex, hexStr, sizeof(latestRxSignal.hex));
+        latestRxSignal.bits   = irResults.bits;
+        latestRxSignal.hasNew = true;
+        xSemaphoreGive(irRxMutex);
+
+        delay(80);
+        digitalWrite(PIN_LED, LOW);
+      }
+
       irrecv.resume();
     }
 
     vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  BLE Callbacks
+// ─────────────────────────────────────────────────────────────
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("[BLE] Dispositivo conectado");
+      // Scan automático ao conectar — envia lista inicial ao app
+      doWifiScanAndNotify();
+    }
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("[BLE] Dispositivo desconectado");
+      // Reinicia advertising se ainda não recebeu credenciais
+      if (currentMode == MODE_BLE && !credentialsReceived) {
+        pServer->startAdvertising();
+      }
+    }
+};
+
+// Callback para scan on-demand: app escreve {"cmd":"scan"} na característica
+class MyScanRequestCallback : public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pChar) {
+      Serial.println("[BLE] Solicitação de scan WiFi recebida pelo app");
+      shouldDoWifiScan = true; // executado no loop() para evitar bloqueio do BLE
+    }
+};
+
+class MyCredsCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String rxValue = pCharacteristic->getValue();
+      if (rxValue.length() > 0) {
+        Serial.println("[BLE] Credenciais WiFi recebidas");
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, rxValue);
+        if (!err) {
+          newSsid = doc["ssid"].as<String>();
+          newPass = doc["password"].as<String>();
+          credentialsReceived = true;
+
+          // Confirma recebimento ao app
+          JsonDocument statusDoc;
+          statusDoc["status"] = "received";
+          String out;
+          serializeJson(statusDoc, out);
+          pCharStatus->setValue(out.c_str());
+          pCharStatus->notify();
+        }
+      }
+    }
+};
+
+void startBLEMode() {
+  Serial.println("[BLE] Iniciando modo Bluetooth...");
+  currentMode         = MODE_BLE;
+  bleStartTime        = millis();
+  credentialsReceived = false;
+  shouldDoWifiScan    = false;
+
+  // Apaga as credenciais WiFi anteriores da memória flash NVS
+  Preferences prefs;
+  prefs.begin("wifi_cfg", false);
+  prefs.clear();
+  prefs.end();
+  Serial.println("[BLE] Credenciais WiFi anteriores apagadas da memoria flash (NVS).");
+
+  // Desconecta do WiFi mas mantém o rádio ativo no modo STA para scan posterior
+  WiFi.disconnect(true, false);
+  delay(100);
+
+  BLEDevice::init("ESP32-IR-Hub");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // CHAR_WIFI_SCAN: NOTIFY (resultado) + WRITE (solicitar novo scan)
+  pCharScan = pService->createCharacteristic(
+                      CHAR_WIFI_SCAN_UUID,
+                      BLECharacteristic::PROPERTY_NOTIFY |
+                      BLECharacteristic::PROPERTY_WRITE
+                    );
+  pCharScan->addDescriptor(new BLE2902());
+  pCharScan->setCallbacks(new MyScanRequestCallback());
+
+  BLECharacteristic *pCharCreds = pService->createCharacteristic(
+                                         CHAR_WIFI_CREDS_UUID,
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
+  pCharCreds->setCallbacks(new MyCredsCallbacks());
+
+  pCharStatus = pService->createCharacteristic(
+                      CHAR_STATUS_UUID,
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
+  pCharStatus->addDescriptor(new BLE2902());
+
+  pService->start();
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  Serial.println("[BLE] Modo pareamento ativo indefinidamente aguardando credenciais.");
+}
+
+void processBLE() {
+  // 1) Credenciais recebidas: salvar na NVS e reiniciar em modo WiFi
+  if (credentialsReceived) {
+    credentialsReceived = false;
+    Serial.println("[BLE] Salvando credenciais na NVS e reiniciando...");
+    Preferences prefs;
+    prefs.begin("wifi_cfg", false);
+    prefs.clear(); // Apaga credenciais antigas antes de salvar as novas
+    prefs.putString("ssid", newSsid);
+    prefs.putString("pass", newPass);
+    prefs.end();
+    delay(1000); // Tempo para o app receber a notificação de confirmação
+    ESP.restart();
+  }
+
+  // 2) Scan WiFi on-demand solicitado pelo app
+  if (shouldDoWifiScan && deviceConnected) {
+    shouldDoWifiScan = false;
+    doWifiScanAndNotify();
   }
 }
 
@@ -484,17 +519,22 @@ void taskIR(void* pvParameters) {
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_IR_RECV, INPUT_PULLUP);
 
   Serial.println("\n==============================");
-  Serial.println("  ESP32 IR HUB v7.0.0 BLE");
+  Serial.println("  ESP32 IR HUB v7.1.0 WiFi+BLE");
   Serial.println("==============================");
 
   // Criar filas e mutex
   irTxQueue = xQueueCreate(20, sizeof(IRCommand));
   irRxMutex = xSemaphoreCreateMutex();
-  bleMutex = xSemaphoreCreateMutex();
 
-  // Verificar credenciais salvas em NVS (fallback)
+  // Iniciar task IR (Core 1)
+  xTaskCreatePinnedToCore(taskIR, "IRTask", 4096, NULL, 2, NULL, 1);
+
+  // Verificar credenciais salvas em NVS
   Preferences prefs;
   prefs.begin("wifi_cfg", true);
   String savedSsid = prefs.getString("ssid", "");
@@ -504,11 +544,21 @@ void setup() {
   String ssidToUse = WIFI_SSID;
   String passToUse = WIFI_PASS;
 
-  if (ssidToUse == "SEU_SSID_AQUI" && savedSsid.length() > 0) {
+  if (ssidToUse == "SEU_SSID_AQUI") {
     ssidToUse = savedSsid;
     passToUse = savedPass;
-    Serial.printf("[WiFi] Usando rede salva na memoria: \"%s\"\n", ssidToUse.c_str());
   }
+
+  // Caso o usuário ligue o ESP32 sem nenhuma credencial salva, entra direto em modo BLE
+  if (ssidToUse.length() == 0 || ssidToUse == "SEU_SSID_AQUI") {
+    Serial.println("[WiFi] Nenhuma credencial WiFi configurada ou salva.");
+    Serial.println("[BLE] Entrando automaticamente em modo de pareamento Bluetooth...");
+    startBLEMode();
+    Serial.println("[Setup] Modo BLE ativo aguardando novas credenciais.");
+    return;
+  }
+
+  Serial.printf("[WiFi] Usando rede configurada: \"%s\"\n", ssidToUse.c_str());
 
   // Conectar ao WiFi
   WiFi.mode(WIFI_STA);
@@ -538,30 +588,63 @@ void setup() {
     Serial.println("[mDNS] Hostname: esp32-ir-hub.local");
   }
 
-  // Criar tasks FreeRTOS
+  // Criar task WebServer (Core 0)
   xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(taskIR,        "IRTask",        4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(taskTouchDetection, "TouchTask", 2048, NULL, 1, NULL, 0);
 
   Serial.println("[Setup] Pronto!");
 }
 
 // ─────────────────────────────────────────────────────────────
-//  loop() — Apenas heartbeat LED
+//  loop()
 // ─────────────────────────────────────────────────────────────
 
 void loop() {
-  handleHeartbeat();
-
-  // Log de reconexão WiFi
-  static bool lastConnected = false;
-  bool connected = (WiFi.status() == WL_CONNECTED);
-  if (connected && !lastConnected) {
-    Serial.printf("[WiFi] Reconectado! IP: %s\n", WiFi.localIP().toString().c_str());
-  } else if (!connected && lastConnected) {
-    Serial.println("[WiFi] Desconectado. Aguardando reconexão automática...");
+  // Botão push button (GPIO 27 = INPUT_PULLUP → LOW quando pressionado)
+  bool btnPressed = (digitalRead(PIN_BUTTON) == LOW);
+  if (btnPressed) {
+    if (!isButtonPressed) {
+      isButtonPressed = true;
+      buttonPressTime = millis();
+    } else if (millis() - buttonPressTime >= 2000) {
+      // Segurou por ≥2s → ativa modo BLE
+      if (currentMode == MODE_WIFI) {
+        startBLEMode();
+      }
+      isButtonPressed = false; // reset para não ficar disparando
+    }
+  } else {
+    isButtonPressed = false;
   }
-  lastConnected = connected;
+
+  if (currentMode == MODE_WIFI) {
+    handleHeartbeat();
+
+    // Log de reconexão WiFi
+    static bool lastConnected = false;
+    bool connected = (WiFi.status() == WL_CONNECTED);
+    if (connected && !lastConnected) {
+      Serial.printf("[WiFi] Reconectado! IP: %s\n", WiFi.localIP().toString().c_str());
+    } else if (!connected && lastConnected) {
+      Serial.println("[WiFi] Desconectado. Aguardando reconexão automática...");
+    }
+    lastConnected = connected;
+
+  } else if (currentMode == MODE_BLE) {
+    processBLE();
+
+    // LED indica estado BLE:
+    //  · Aguardando pareamento → pisca rápido (150ms)
+    //  · Dispositivo conectado → pisca devagar (1000ms)
+    unsigned long bleLedInterval = deviceConnected ? 1000UL : 150UL;
+    unsigned long now = millis();
+    if (now - lastHeartbeat >= bleLedInterval) {
+      digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+      lastHeartbeat = now;
+    }
+  }
+
+  // LED de status: sempre ativo, independente do modo
+  handleStatusLED();
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
 }

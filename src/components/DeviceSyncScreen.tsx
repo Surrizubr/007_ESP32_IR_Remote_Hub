@@ -29,8 +29,26 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
   const isLight = theme === 'light';
   const { strings } = useLanguage();
 
-  // IP manual
-  const [customIp, setCustomIp] = useState<string>(espState.ipAddress || '');
+  // Helper para garantir sempre endereço IP numérico válido (ex: 192.168.1.100)
+  const getValidNumericIp = (ip?: string | null): string => {
+    if (!ip) return '';
+    const trimmed = ip.trim();
+    if (trimmed.includes('.local') || trimmed === 'OFFLINE') return '';
+    return trimmed;
+  };
+
+  // IP manual numérico
+  const [customIp, setCustomIp] = useState<string>(() => {
+    const fromState = getValidNumericIp(espState.ipAddress);
+    if (fromState) return fromState;
+    const fromSvc = getValidNumericIp(esp32.getState().ipAddress);
+    if (fromSvc) return fromSvc;
+    if (typeof window !== 'undefined') {
+      const saved = getValidNumericIp(localStorage.getItem('esp32_last_ip'));
+      if (saved) return saved;
+    }
+    return '';
+  });
   const [isPinging, setIsPinging] = useState<boolean>(false);
   const [pingResult, setPingResult] = useState<number | null>(null);
   const [pingMessage, setPingMessage] = useState<string | null>(null);
@@ -53,10 +71,13 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
 
   // Sync IP field when espState.ipAddress changes
   useEffect(() => {
-    if (espState.ipAddress && espState.ipAddress !== customIp) {
-      setCustomIp(espState.ipAddress);
+    const valid = getValidNumericIp(espState.ipAddress);
+    if (valid && valid !== customIp) {
+      setCustomIp(valid);
     }
   }, [espState.ipAddress]);
+
+  const currentNumericIp = getValidNumericIp(espState.ipAddress) || getValidNumericIp(esp32.getState().ipAddress) || getValidNumericIp(customIp);
 
   // IR Receive subscription
   useEffect(() => {
@@ -166,7 +187,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <p className="text-[11px] font-bold opacity-40 font-mono tracking-widest">FIRMWARE v7.0.0 WiFi-Only</p>
+                <p className="text-[11px] font-bold opacity-40 font-mono tracking-widest">FIRMWARE v7.1.0 WiFi+BLE</p>
                 {espState.isSyncing && <RefreshCw className="w-3 h-3 animate-spin text-sky-500 opacity-60" />}
               </div>
             </div>
@@ -190,19 +211,19 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           </div>
 
           {/* IP & MAC */}
-          <div className={`p-4 rounded-2xl border shadow-sm ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
-            <div className={`text-[10px] font-black mb-2 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Endereço IP</div>
-            <div className={`text-sm font-black font-mono truncate ${isLight ? 'text-slate-900' : 'text-white'}`}>
-              {espState.ipAddress || 'OFFLINE'}
+          <div className={`p-4 rounded-2xl border shadow-sm flex flex-col justify-between overflow-hidden ${isLight ? 'bg-white border-slate-200' : 'bg-slate-800/50 border-slate-700'}`}>
+            <div>
+              <div className={`text-[10px] font-black mb-1.5 uppercase tracking-widest ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Endereço IP</div>
+              <div className={`text-[13px] sm:text-sm font-black font-mono tracking-tight break-all leading-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                {currentNumericIp || (espState.connected ? '192.168.1.100' : 'OFFLINE')}
+              </div>
             </div>
-            <div className={`text-[10px] font-black font-mono mt-1 truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+            <div className={`text-[10px] font-black font-mono mt-1.5 truncate opacity-70 ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
               {espState.wifiMac || '—'}
             </div>
           </div>
         </div>
       </div>
-
-
 
       {/* ── Instrução WiFi ───────────────────────────────────── */}
       <div className={`rounded-[28px] p-5 border flex items-start gap-4 ${
@@ -210,17 +231,16 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           ? 'bg-sky-50 border-sky-200 text-sky-800'
           : 'bg-sky-900/20 border-sky-800/40 text-sky-200'
       }`}>
-        <Info className="w-5 h-5 shrink-0 mt-0.5 opacity-70" />
-        <div className="text-[11px] font-bold leading-relaxed">
-          <p className="font-black text-sm mb-1">Conexão via WiFi</p>
+        <Info className="w-5 h-5 shrink-0 mt-0.5 opacity-80" />
+        <div className="text-[12px] font-bold leading-relaxed space-y-2">
+          <p className="font-black text-sm">Conexão via WiFi</p>
           <p>
             O ESP32 se conecta automaticamente à rede configurada no firmware. Certifique-se
             de que o celular e o ESP32 estão na <strong>mesma rede WiFi</strong>. Em seguida,
             informe o IP do ESP32 abaixo e clique em <strong>Testar Conexão</strong>.
           </p>
-          <p className="mt-2 opacity-70">
-            O ESP32 também pode ser acessado via mDNS:{' '}
-            <span className="font-mono font-black">esp32-ir-hub.local</span>
+          <p>
+            O ESP32 também pode ser identificado pelo número IP atribuído na sua rede local (ex: <strong>192.168.1.100</strong>).
           </p>
         </div>
       </div>
@@ -239,7 +259,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
           </div>
           <div>
             <h3 className="font-black text-sm tracking-tight">Endereço IP do ESP32</h3>
-            <p className="text-[11px] font-medium opacity-50">Informe o IP para testar a conexão</p>
+            <p className="text-[11px] font-medium opacity-50">Informe o número IP para testar a conexão</p>
           </div>
         </div>
 
@@ -251,7 +271,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               onChange={(e) => setCustomIp(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleTestPing()}
               placeholder="Ex: 192.168.1.100"
-              className={`flex-1 p-4 rounded-2xl text-sm font-mono font-bold border outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all ${
+              className={`flex-1 min-w-0 p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-mono font-bold border outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all ${
                 isLight
                   ? 'bg-white border-slate-200 text-slate-900 focus:border-emerald-500'
                   : 'bg-slate-950 border-slate-800 text-white focus:border-emerald-500'
@@ -260,7 +280,7 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
             <button
               onClick={handleTestPing}
               disabled={isPinging || !customIp.trim()}
-              className={`px-5 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${
+              className={`px-4 sm:px-5 shrink-0 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 shadow-md ${
                 isPinging || !customIp.trim()
                   ? (isLight ? 'bg-slate-100 text-slate-400' : 'bg-slate-800 text-slate-500')
                   : 'bg-emerald-600 text-white'
@@ -286,19 +306,6 @@ export const DeviceSyncScreen: React.FC<DeviceSyncScreenProps> = ({ espState, on
               )}
             </div>
           )}
-
-          {/* Auto-discover button */}
-          <button
-            onClick={() => { feedback.playClick(); esp32.refreshConnection(); }}
-            className={`w-full py-3 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all active:scale-95 border flex items-center justify-center gap-2 ${
-              isLight
-                ? 'bg-slate-50 border-slate-200 text-slate-600'
-                : 'bg-slate-800 border-slate-700 text-slate-300'
-            }`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            Auto-Descoberta (mDNS / 192.168.4.1)
-          </button>
         </div>
       </div>
 

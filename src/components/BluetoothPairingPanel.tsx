@@ -122,7 +122,7 @@ export const BluetoothConnectionCard: React.FC = () => {
 
     const result = await bluetoothService.startScan();
     if (!result) {
-      setError('Nenhum dispositivo encontrado. Segure Touch9 do ESP32 por 1s para ativar o modo de pareamento.');
+      setError('Nenhum dispositivo encontrado. Segure o botão de pareamento do hub por no mínimo 2 segundos. Quando o LED piscar rapidamente, clique em Conectar via Bluetooth.');
       setBleState('idle');
       return;
     }
@@ -267,8 +267,8 @@ export const BluetoothConnectionCard: React.FC = () => {
       )}
 
       {!isConnected && !isLoading && (
-        <p className="text-[10px] text-center mt-3 font-bold opacity-30 uppercase tracking-widest">
-          Segure Touch9 do ESP32 por 1s para ativar o pareamento
+        <p className="text-[10px] text-center mt-3 font-bold opacity-40 uppercase tracking-wider leading-relaxed px-2">
+          SEGURE O BOTÃO DE PAREAMENTO DO HUB POR NO MÍNIMO 2 SEGUNDOS. QUANDO O LED PISCAR RAPIDAMENTE, CLIQUE EM CONECTAR VIA BLUETOOTH
         </p>
       )}
     </div>

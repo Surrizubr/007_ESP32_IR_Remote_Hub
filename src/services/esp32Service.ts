@@ -44,7 +44,11 @@ class ESP32Service {
   private loadPersistedState() {
     try {
       const savedIp = localStorage.getItem('esp32_last_ip');
-      if (savedIp) this.state.ipAddress = savedIp;
+      if (savedIp && !savedIp.includes('.local')) {
+        this.state.ipAddress = savedIp;
+      } else {
+        localStorage.removeItem('esp32_last_ip');
+      }
       const savedSsid = localStorage.getItem('esp32_last_ssid');
       if (savedSsid) this.state.wifiSsid = savedSsid;
     } catch (e) {
@@ -54,7 +58,7 @@ class ESP32Service {
 
   private persistState() {
     try {
-      if (this.state.ipAddress) {
+      if (this.state.ipAddress && !this.state.ipAddress.includes('.local')) {
         localStorage.setItem('esp32_last_ip', this.state.ipAddress);
       }
       if (this.state.wifiSsid) {
@@ -95,9 +99,12 @@ class ESP32Service {
   }
 
   public setIpAddress(ip: string) {
-    this.state.ipAddress = ip.trim();
-    this.persistState();
-    this.notify();
+    const clean = ip.trim();
+    if (!clean.includes('.local')) {
+      this.state.ipAddress = clean;
+      this.persistState();
+      this.notify();
+    }
   }
 
   // ─── Auto-discovery: poll a cada 5 segundos ────────────────
@@ -117,6 +124,10 @@ class ESP32Service {
           });
           if (res.ok) {
             const data = await res.json();
+            if (data.ip && typeof data.ip === 'string' && data.ip.includes('.')) {
+              this.state.ipAddress = data.ip;
+              this.persistState();
+            }
             if (data.uptime)   this.state.uptimeSeconds = data.uptime;
             if (data.freeHeap) this.state.freeHeap = data.freeHeap;
             if (data.rssi)     { this.state.rssi = data.rssi; this.state.wifiRssi = data.rssi; }
@@ -156,7 +167,16 @@ class ESP32Service {
       if (res.ok) {
         const data = await res.json();
         this.state.wifiConnected = true;
-        this.state.ipAddress = cleanIp;
+
+        // Se a resposta contiver o IP real retornado pelo ESP32 (ex: "192.168.1.100"), usa sempre o IP numérico!
+        const numericIp = (data.ip && typeof data.ip === 'string' && data.ip.includes('.'))
+          ? data.ip
+          : (!cleanIp.includes('.local') ? cleanIp : '');
+
+        if (numericIp) {
+          this.state.ipAddress = numericIp;
+        }
+
         if (data.uptime)   this.state.uptimeSeconds = data.uptime;
         if (data.freeHeap) this.state.freeHeap = data.freeHeap;
         if (data.rssi)     this.state.rssi = data.rssi;
@@ -168,7 +188,7 @@ class ESP32Service {
           success: true,
           latencyMs: latency,
           data,
-          message: `Conectado ao ESP32 via WiFi (${latency}ms)! Uptime: ${Math.floor((data.uptime || 0) / 60)}m.`,
+          message: `Conectado ao ESP32 via WiFi (${latency}ms)! IP: ${numericIp || this.state.ipAddress}`,
         };
       }
     } catch { }
@@ -193,7 +213,7 @@ class ESP32Service {
 
     try {
       // 1. IP salvo
-      if (this.state.ipAddress) {
+      if (this.state.ipAddress && !this.state.ipAddress.includes('.local')) {
         const r = await this.testWiFiConnection(this.state.ipAddress);
         result.wifi = r.success;
       }
@@ -201,12 +221,12 @@ class ESP32Service {
       // 2. Fallback: mDNS ou SoftAP
       if (!result.wifi) {
         const candidates = ['esp32-ir-hub.local', '192.168.4.1'];
-        for (const ip of candidates) {
-          if (ip === this.state.ipAddress) continue;
-          const r = await this.testWiFiConnection(ip);
+        for (const candidate of candidates) {
+          if (candidate === this.state.ipAddress) continue;
+          const r = await this.testWiFiConnection(candidate);
           if (r.success) {
             result.wifi = true;
-            this.addLog('success', `ESP32 encontrado em: ${ip}`);
+            this.addLog('success', `ESP32 encontrado! IP: ${this.state.ipAddress}`);
             break;
           }
         }
@@ -345,10 +365,21 @@ class ESP32Service {
             if (res.ok) {
               const data = await res.json();
               if (data && data.hasNew) {
+                const hex = data.hex || '0x0';
+                const bits = data.bits || 0;
+                const proto = (data.protocol || '').toUpperCase();
+                // Ignora pacotes de ruído/glitch espúrio de RF ou ruído na fonte
+                if (hex === '0x0' || hex === '0x00' || bits === 0) {
+                  return;
+                }
+                if (proto === 'UNKNOWN' && bits < 12) {
+                  return;
+                }
+
                 this.simulateIncomingIR(
                   data.protocol || 'NEC',
-                  data.hex || '0x0',
-                  data.bits || 32,
+                  hex,
+                  bits || 32,
                   data.rawTimings
                 );
               }
