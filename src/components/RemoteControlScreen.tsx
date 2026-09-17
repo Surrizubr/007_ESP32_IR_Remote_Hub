@@ -33,6 +33,8 @@ import {
   Maximize2,
   Shield,
   Trash2,
+  Cpu,
+  Speaker,
 } from 'lucide-react';
 import { IRCommand, ESP32DeviceState, RemoteDevice, RemoteLayoutType, ActivityLogItem } from '../types';
 import { esp32 } from '../services/esp32Service';
@@ -46,10 +48,14 @@ import { ProjectorRemote } from './remotes/ProjectorRemote';
 import { AddRemoteModal } from './AddRemoteModal';
 import { ManageRemotesModal } from './ManageRemotesModal';
 import { WhiteTvRemote } from './remotes/WhiteTvRemote';
+import { DecoderRemote } from './remotes/DecoderRemote';
+import { AmplifierRemote } from './remotes/AmplifierRemote';
 
 export type RemoteDeviceType =
   | 'tv'
   | 'tv_white'
+  | 'decoder'
+  | 'amplifier'
   | 'ac'
   | 'sound'
   | 'lights'
@@ -116,7 +122,7 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
   // Check if current remote is a system default
   const isCurrentDefault = Boolean(
     currentRemote.isDefault ||
-    ['tv', 'tv_white', 'ac', 'sound', 'lights', 'smartbox', 'projector', 'custom'].includes(currentRemote.id)
+    ['tv', 'tv_white', 'decoder', 'amplifier', 'ac', 'sound', 'lights', 'smartbox', 'projector', 'custom'].includes(currentRemote.id)
   );
 
   const activeLayout = currentRemote.layoutType;
@@ -135,6 +141,10 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
 
   const getLayoutIcon = (type: RemoteLayoutType) => {
     switch (type) {
+      case 'decoder':
+        return Cpu;
+      case 'amplifier':
+        return Speaker;
       case 'ac':
         return AirVent;
       case 'sound':
@@ -160,13 +170,17 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
       case 'tv':
         return language === 'pt' ? 'Televisão' : language === 'es' ? 'Televisión' : 'Television';
       case 'tv_white':
-        return language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)';
+        return language === 'pt' ? 'TV Smart' : language === 'es' ? 'TV Smart' : 'Smart TV';
+      case 'decoder':
+        return language === 'pt' ? 'Decodificador' : language === 'es' ? 'Decodificador' : 'Decoder';
+      case 'amplifier':
+        return language === 'pt' ? 'Amplificador de Som' : language === 'es' ? 'Amplificador de Sonido' : 'Sound Amplifier';
       case 'ac':
         return language === 'pt' ? 'Ar Condicionado' : language === 'es' ? 'Aire Acondicionado' : 'Air Conditioner';
       case 'sound':
         return language === 'pt' ? 'Aparelho de Som' : language === 'es' ? 'Equipo de Sonido' : 'Sound System';
       case 'lights':
-        return language === 'pt' ? 'Luminárias' : language === 'es' ? 'Luminarias' : 'Lights & RGB';
+        return language === 'pt' ? 'Lâmpada LED' : language === 'es' ? 'Lámpara LED' : 'LED Lamp';
       case 'smartbox':
         return 'Smart Box';
       case 'projector':
@@ -1437,6 +1451,30 @@ export const RemoteControlScreen: React.FC<RemoteControlScreenProps> = ({
         {/* ========================================================================= */}
         {activeLayout === 'tv_white' && (
           <WhiteTvRemote
+            isLight={isLight}
+            isConfigMode={isConfigMode}
+            getMappedCommand={getMappedCommand}
+            onButtonClick={handleButtonClick}
+          />
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 2.6: DECODIFICADOR (CLARO NET HD / NOW) REMOTE */}
+        {/* ========================================================================= */}
+        {activeLayout === 'decoder' && (
+          <DecoderRemote
+            isLight={isLight}
+            isConfigMode={isConfigMode}
+            getMappedCommand={getMappedCommand}
+            onButtonClick={handleButtonClick}
+          />
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 2.7: AMPLIFICADOR DE SOM (5.1/2.1 SURROUND) REMOTE */}
+        {/* ========================================================================= */}
+        {activeLayout === 'amplifier' && (
+          <AmplifierRemote
             isLight={isLight}
             isConfigMode={isConfigMode}
             getMappedCommand={getMappedCommand}

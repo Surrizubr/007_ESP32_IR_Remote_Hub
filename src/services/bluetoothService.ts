@@ -144,7 +144,7 @@ class BluetoothService {
         this.connectedDeviceId,
         SERVICE_UUID,
         CHAR_WIFI_SCAN_UUID,
-        encoder.encode(payload)
+        new DataView(encoder.encode(payload).buffer)
       );
       console.log('[Bluetooth] Solicitação de scan WiFi enviada');
     } catch (error) {
@@ -219,7 +219,7 @@ class BluetoothService {
         this.connectedDeviceId,
         SERVICE_UUID,
         CHAR_WIFI_CREDS_UUID,
-        data
+        new DataView(data.buffer)
       );
 
       console.log('[Bluetooth] Credenciais enviadas com sucesso');

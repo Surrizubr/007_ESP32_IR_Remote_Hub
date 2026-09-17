@@ -110,6 +110,11 @@ function MainApp() {
           return [
             ...parsed.map((r: RemoteDevice) => ({
               ...r,
+              name: (r.id === 'tv_white' && (r.name === 'TV Smart (Branco)' || !r.name))
+                ? 'TV Smart'
+                : (r.id === 'lights' && (r.name === 'Luminárias' || !r.name))
+                ? 'Lâmpada LED'
+                : r.name,
               isDefault: r.isDefault ?? defaultIds.has(r.id),
             })),
             ...missingDefaults,

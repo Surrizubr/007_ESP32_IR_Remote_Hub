@@ -16,6 +16,8 @@ import {
   Sparkles,
   Search,
   Plus,
+  Cpu,
+  Speaker,
 } from 'lucide-react';
 import { RemoteDevice, RemoteLayoutType } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -60,6 +62,10 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
 
   const getLayoutIcon = (type: RemoteLayoutType) => {
     switch (type) {
+      case 'decoder':
+        return Cpu;
+      case 'amplifier':
+        return Speaker;
       case 'tv':
       case 'tv_white':
         return Tv;
@@ -84,13 +90,17 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
       case 'tv':
         return language === 'pt' ? 'Televisão' : language === 'es' ? 'Televisión' : 'Television';
       case 'tv_white':
-        return language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)';
+        return language === 'pt' ? 'TV Smart' : language === 'es' ? 'TV Smart' : 'Smart TV';
+      case 'decoder':
+        return language === 'pt' ? 'Decodificador' : language === 'es' ? 'Decodificador' : 'Decoder';
+      case 'amplifier':
+        return language === 'pt' ? 'Amplificador de Som' : language === 'es' ? 'Amplificador de Sonido' : 'Sound Amplifier';
       case 'ac':
         return language === 'pt' ? 'Ar Condicionado' : language === 'es' ? 'Aire Acondicionado' : 'Air Conditioner';
       case 'sound':
         return language === 'pt' ? 'Aparelho de Som' : language === 'es' ? 'Equipo de Sonido' : 'Sound System';
       case 'lights':
-        return language === 'pt' ? 'Luminárias' : language === 'es' ? 'Luminarias' : 'Lighting';
+        return language === 'pt' ? 'Lâmpada LED' : language === 'es' ? 'Lámpara LED' : 'LED Lamp';
       case 'smartbox':
         return 'Smart Box';
       case 'projector':
@@ -357,6 +367,8 @@ export const ManageRemotesModal: React.FC<ManageRemotesModalProps> = ({
                 >
                   <option value="tv">{language === 'pt' ? 'Televisão (TV / Smart TV)' : language === 'es' ? 'Televisión (TV / Smart TV)' : 'Television (TV / Smart TV)'}</option>
                   <option value="tv_white">{language === 'pt' ? 'TV Smart Branco (Estilo LG)' : language === 'es' ? 'TV Smart Blanco (Estilo LG)' : 'Smart TV White (LG Style)'}</option>
+                  <option value="decoder">{language === 'pt' ? 'Decodificador (Claro NET / TV a Cabo)' : language === 'es' ? 'Decodificador (Cable / TV Box)' : 'Decoder (Cable / Satellite STB)'}</option>
+                  <option value="amplifier">{language === 'pt' ? 'Amplificador de Som (Surround 5.1/2.1)' : language === 'es' ? 'Amplificador de Sonido (Surround 5.1/2.1)' : 'Sound Amplifier (Surround 5.1/2.1)'}</option>
                   <option value="ac">{language === 'pt' ? 'Ar Condicionado (Climatização)' : language === 'es' ? 'Aire Acondicionado (Clima)' : 'Air Conditioner (Climate)'}</option>
                   <option value="sound">{language === 'pt' ? 'Aparelho de Som (Audio / Receiver)' : language === 'es' ? 'Equipo de Sonido (Audio / Receiver)' : 'Sound System (Audio / Receiver)'}</option>
                   <option value="lights">{language === 'pt' ? 'Luminárias (RGB & LED)' : language === 'es' ? 'Luminarias (RGB & LED)' : 'Lights (RGB & LED)'}</option>

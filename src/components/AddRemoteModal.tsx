@@ -11,6 +11,8 @@ import {
   Sliders,
   Check,
   Sparkles,
+  Cpu,
+  Speaker,
 } from 'lucide-react';
 import { RemoteDevice, RemoteLayoutType } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -62,7 +64,7 @@ export const AddRemoteModal: React.FC<AddRemoteModalProps> = ({
     },
     {
       type: 'tv_white',
-      label: language === 'pt' ? 'TV Smart (Branco)' : language === 'es' ? 'TV Smart (Blanco)' : 'Smart TV (White)',
+      label: language === 'pt' ? 'TV Smart' : language === 'es' ? 'TV Smart' : 'Smart TV',
       description: language === 'pt'
         ? 'Controle estilo LG com fundo branco, Netflix, Amazon Prime, teclado numérico e teclas coloridas'
         : language === 'es'
@@ -71,6 +73,30 @@ export const AddRemoteModal: React.FC<AddRemoteModalProps> = ({
       icon: Tv,
       color: 'from-amber-500/20 to-orange-500/20 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800',
       badge: 'LG / Smart TV',
+    },
+    {
+      type: 'decoder',
+      label: language === 'pt' ? 'Decodificador' : language === 'es' ? 'Decodificador' : 'Decoder',
+      description: language === 'pt'
+        ? 'Controle estilo Claro NET HD / NOW com fundo branco, controles de mídia, botão now, D-Pad e teclas coloridas'
+        : language === 'es'
+        ? 'Control estilo Claro NET HD / NOW con fondo blanco, controles de medios, botón now, D-Pad y teclas de colores'
+        : 'Claro NET HD / NOW style remote with white background, media controls, now button, D-Pad and color keys',
+      icon: Cpu,
+      color: 'from-orange-500/20 to-red-500/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800',
+      badge: 'Claro / NET HD',
+    },
+    {
+      type: 'amplifier',
+      label: language === 'pt' ? 'Amplificador de Som' : language === 'es' ? 'Amplificador de Sonido' : 'Sound Amplifier',
+      description: language === 'pt'
+        ? 'Controle estilo som surround 5.1/2.1 com fundo branco, Bluetooth, FM, USB/SD, AUX, RCA e sintonia'
+        : language === 'es'
+        ? 'Control estilo sonido surround 5.1/2.1 con fondo blanco, Bluetooth, FM, USB/SD, AUX, RCA y sintonía'
+        : '5.1/2.1 surround sound amplifier remote with white background, Bluetooth, FM, USB/SD, AUX, RCA and tuning',
+      icon: Speaker,
+      color: 'from-purple-500/20 to-indigo-500/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800',
+      badge: 'Surround 5.1 / 2.1',
     },
     {
       type: 'ac',
@@ -98,15 +124,15 @@ export const AddRemoteModal: React.FC<AddRemoteModalProps> = ({
     },
     {
       type: 'lights',
-      label: language === 'pt' ? 'Luminárias & Fitas LED' : language === 'es' ? 'Luminarias & Tiras LED' : 'Lights & LED Strips',
+      label: language === 'pt' ? 'Lâmpada LED' : language === 'es' ? 'Lámpara LED' : 'LED Lamp',
       description: language === 'pt'
-        ? 'Paleta de 12 cores estáticas RGB, temperaturas 2700K/6500K, brilho e efeitos'
+        ? 'Controle clássico de 24 teclas com fundo branco, letras pretas, matriz RGB de 16 cores, brilho e efeitos Flash, Strobe, Fade e Smooth'
         : language === 'es'
-        ? 'Paleta de 12 colores estáticos RGB, temperaturas 2700K/6500K, brillo y efectos'
-        : 'Palette of 12 static RGB colors, 2700K/6500K temperatures, brightness and effects',
+        ? 'Control clásico de 24 teclas con fondo blanco, letras negras, matriz RGB de 16 colores, brillo y efectos Flash, Strobe, Fade y Smooth'
+        : 'Classic 24-key remote with white background, black letters, 16 RGB color matrix, brightness and Flash, Strobe, Fade, Smooth effects',
       icon: Lightbulb,
       color: 'from-amber-500/20 to-yellow-500/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800',
-      badge: language === 'pt' ? 'Iluminação RGB' : language === 'es' ? 'Iluminación RGB' : 'RGB Lighting',
+      badge: language === 'pt' ? '24 Teclas RGB' : language === 'es' ? '24 Teclas RGB' : '24-Key RGB',
     },
     {
       type: 'smartbox',

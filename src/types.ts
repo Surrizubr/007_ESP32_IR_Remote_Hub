@@ -111,6 +111,7 @@ export type RemoteLayoutType =
   | 'tv'
   | 'tv_white'
   | 'decoder'
+  | 'amplifier'
   | 'ac'
   | 'fan'
   | 'sound'

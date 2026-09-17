@@ -1,17 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Power,
-  Sun,
-  SunMedium,
-  Moon,
-  Sparkles,
-  Zap,
-  Clock,
-  Flame,
-  Droplets,
-  Palette,
-  Lightbulb,
-} from 'lucide-react';
+import { Lightbulb, Check } from 'lucide-react';
 import { IRCommand } from '../../types';
 
 interface LightsRemoteProps {
@@ -22,331 +10,585 @@ interface LightsRemoteProps {
 }
 
 export const LightsRemote: React.FC<LightsRemoteProps> = ({
-  isLight,
   isConfigMode,
   getMappedCommand,
   onButtonClick,
 }) => {
-  // Lighting State Simulation
+  // Simulated Interactive LED Lamp State
   const [power, setPower] = useState<boolean>(true);
-  const [brightness, setBrightness] = useState<number>(80); // 10 to 100
-  const [selectedColor, setSelectedColor] = useState<string>('#3b82f6');
-  const [colorName, setColorName] = useState<string>('Azul Real');
+  const [brightness, setBrightness] = useState<number>(100); // 20 to 100
+  const [selectedColor, setSelectedColor] = useState<string>('#ffffff');
+  const [colorName, setColorName] = useState<string>('Branco Puro');
   const [effectMode, setEffectMode] = useState<'STATIC' | 'FLASH' | 'STROBE' | 'FADE' | 'SMOOTH'>('STATIC');
-  const [colorTemp, setColorTemp] = useState<'WARM (2700K)' | 'NEUTRAL (4000K)' | 'COOL (6500K)'>('NEUTRAL (4000K)');
-  const [timerMinutes, setTimerMinutes] = useState<number | null>(null);
+  const [isTransmitting, setIsTransmitting] = useState<boolean>(false);
 
-  const colorsList = [
-    { name: 'Vermelho', hex: '#ef4444', key: 'light_color_red' },
-    { name: 'Verde', hex: '#22c55e', key: 'light_color_green' },
-    { name: 'Azul', hex: '#3b82f6', key: 'light_color_blue' },
-    { name: 'Branco', hex: '#ffffff', key: 'light_color_white' },
-    { name: 'Laranja', hex: '#f97316', key: 'light_color_orange' },
-    { name: 'Amarelo', hex: '#eab308', key: 'light_color_yellow' },
-    { name: 'Ciano', hex: '#06b6d4', key: 'light_color_cyan' },
-    { name: 'Roxo', hex: '#a855f7', key: 'light_color_purple' },
-    { name: 'Rosa', hex: '#ec4899', key: 'light_color_pink' },
-    { name: 'Âmbar', hex: '#d97706', key: 'light_color_amber' },
-    { name: 'Esmeralda', hex: '#10b981', key: 'light_color_emerald' },
-    { name: 'Índigo', hex: '#6366f1', key: 'light_color_indigo' },
-  ];
+  // Trigger top IR LED blink on button press
+  const triggerIrPulse = () => {
+    setIsTransmitting(true);
+    setTimeout(() => setIsTransmitting(false), 200);
+  };
 
+  // Button Click Handlers with interactive state updating
   const handlePowerOn = () => {
-    onButtonClick('light_on', 'Luminária Ligar (ON)', () => {
+    triggerIrPulse();
+    onButtonClick('light_on', 'Lâmpada LED Ligar (ON)', () => {
       setPower(true);
     });
   };
 
   const handlePowerOff = () => {
-    onButtonClick('light_off', 'Luminária Desligar (OFF)', () => {
+    triggerIrPulse();
+    onButtonClick('light_off', 'Lâmpada LED Desligar (OFF)', () => {
       setPower(false);
     });
   };
 
   const handleBrightUp = () => {
-    onButtonClick('light_bright_up', 'Luminária Brilho +', () => {
+    triggerIrPulse();
+    onButtonClick('light_bright_up', 'Lâmpada LED Brilho +', () => {
       setPower(true);
-      setBrightness((prev) => Math.min(100, prev + 15));
+      setBrightness((prev) => Math.min(100, prev + 20));
     });
   };
 
   const handleBrightDown = () => {
-    onButtonClick('light_bright_down', 'Luminária Brilho -', () => {
+    triggerIrPulse();
+    onButtonClick('light_bright_down', 'Lâmpada LED Brilho -', () => {
       setPower(true);
-      setBrightness((prev) => Math.max(10, prev - 15));
+      setBrightness((prev) => Math.max(20, prev - 20));
     });
   };
 
-  const handleColorPick = (col: { name: string; hex: string; key: string }) => {
-    onButtonClick(col.key, `Luminária Cor ${col.name}`, () => {
+  const handleColorClick = (key: string, label: string, hex: string) => {
+    triggerIrPulse();
+    onButtonClick(key, `Lâmpada LED ${label}`, () => {
       setPower(true);
-      setSelectedColor(col.hex);
-      setColorName(col.name);
+      setSelectedColor(hex);
+      setColorName(label);
       setEffectMode('STATIC');
     });
   };
 
-  const handleWarmLight = () => {
-    onButtonClick('light_warm', 'Luminária Luz Quente (2700K)', () => {
+  const handleEffectClick = (key: string, effect: 'FLASH' | 'STROBE' | 'FADE' | 'SMOOTH') => {
+    triggerIrPulse();
+    onButtonClick(key, `Lâmpada LED Modo ${effect}`, () => {
       setPower(true);
-      setSelectedColor('#fb923c');
-      setColorName('Luz Quente');
-      setColorTemp('WARM (2700K)');
-      setEffectMode('STATIC');
+      setEffectMode(effect);
     });
   };
 
-  const handleCoolLight = () => {
-    onButtonClick('light_cool', 'Luminária Luz Fria (6500K)', () => {
-      setPower(true);
-      setSelectedColor('#e0f2fe');
-      setColorName('Luz Fria');
-      setColorTemp('COOL (6500K)');
-      setEffectMode('STATIC');
-    });
-  };
-
-  const handleEffect = (mode: 'FLASH' | 'STROBE' | 'FADE' | 'SMOOTH', key: string) => {
-    onButtonClick(key, `Luminária Modo ${mode}`, () => {
-      setPower(true);
-      setEffectMode(mode);
-    });
-  };
-
-  const handleTimer = (minutes: number, key: string) => {
-    onButtonClick(key, `Luminária Timer ${minutes}min`, () => {
-      setTimerMinutes((prev) => (prev === minutes ? null : minutes));
-    });
+  // Helper for button badge/highlight in config mode
+  const getButtonConfigRing = (key: string) => {
+    if (!isConfigMode) return '';
+    const mapped = getMappedCommand(key);
+    return mapped
+      ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-white'
+      : 'ring-2 ring-amber-400 ring-offset-2 ring-offset-white';
   };
 
   return (
-    <div id="lights-remote-layout" className="w-full flex flex-col items-center space-y-3.5 animate-in fade-in duration-200">
-      {/* POWER & BRIGHTNESS ROW */}
-      <div className="w-full grid grid-cols-4 gap-2">
-        {/* ON Button */}
-        <button
-          id="btn-light-on"
-          onClick={handlePowerOn}
-          className={`h-12 rounded-2xl flex flex-col items-center justify-center transition-all active:scale-90 border font-bold ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : power
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 border-emerald-500'
-              : isLight
-              ? 'bg-white hover:bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm'
-              : 'bg-slate-800/90 text-emerald-400 border-slate-700'
-          }`}
-        >
-          <Power className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">ON</span>
-        </button>
-
-        {/* OFF Button */}
-        <button
-          id="btn-light-off"
-          onClick={handlePowerOff}
-          className={`h-12 rounded-2xl flex flex-col items-center justify-center transition-all active:scale-90 border font-bold ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : !power
-              ? 'bg-red-600 text-white shadow-md shadow-red-600/30 border-red-500'
-              : isLight
-              ? 'bg-white hover:bg-red-50 text-red-600 border-red-200 shadow-sm'
-              : 'bg-slate-800/90 text-red-400 border-slate-700'
-          }`}
-        >
-          <Power className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">OFF</span>
-        </button>
-
-        {/* Brightness UP */}
-        <button
-          id="btn-light-bright-up"
-          onClick={handleBrightUp}
-          className={`h-12 rounded-2xl flex flex-col items-center justify-center transition-all active:scale-90 border font-bold ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : isLight
-              ? 'bg-white hover:bg-amber-50 text-amber-700 border-amber-200 shadow-sm'
-              : 'bg-slate-800/90 hover:bg-slate-700 text-amber-300 border-slate-700'
-          }`}
-        >
-          <Sun className="w-4 h-4 text-amber-500" />
-          <span className="text-[10px] mt-0.5">BRILHO +</span>
-        </button>
-
-        {/* Brightness DOWN */}
-        <button
-          id="btn-light-bright-down"
-          onClick={handleBrightDown}
-          className={`h-12 rounded-2xl flex flex-col items-center justify-center transition-all active:scale-90 border font-bold ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : isLight
-              ? 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-sm'
-              : 'bg-slate-800/90 hover:bg-slate-700 text-slate-300 border-slate-700'
-          }`}
-        >
-          <SunMedium className="w-4 h-4 text-slate-400" />
-          <span className="text-[10px] mt-0.5">BRILHO -</span>
-        </button>
-      </div>
-
-      {/* COLOR TEMPERATURE PRESETS (QUENTE, NEUTRO, FRIO) */}
-      <div className="w-full grid grid-cols-3 gap-2">
-        <button
-          id="btn-light-warm"
-          onClick={handleWarmLight}
-          className={`h-11 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-bold transition-all active:scale-95 ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : isLight
-              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200 shadow-sm'
-              : 'bg-amber-950/40 hover:bg-amber-950/60 text-amber-200 border-amber-700/50'
-          }`}
-        >
-          <Flame className="w-3.5 h-3.5 text-amber-500" />
-          <span>Luz Quente</span>
-        </button>
-
-        <button
-          id="btn-light-white"
-          onClick={() => handleColorPick({ name: 'Branco 100%', hex: '#ffffff', key: 'light_color_white' })}
-          className={`h-11 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-bold transition-all active:scale-95 ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : isLight
-              ? 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300 shadow-sm'
-              : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-600'
-          }`}
-        >
-          <Sun className="w-3.5 h-3.5 text-yellow-400" />
-          <span>Branco Puro</span>
-        </button>
-
-        <button
-          id="btn-light-cool"
-          onClick={handleCoolLight}
-          className={`h-11 rounded-xl border flex items-center justify-center gap-1.5 text-xs font-bold transition-all active:scale-95 ${
-            isConfigMode
-              ? isLight
-                ? 'border-amber-400 bg-amber-50 text-amber-800'
-                : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : isLight
-              ? 'bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-200 shadow-sm'
-              : 'bg-sky-950/40 hover:bg-sky-950/60 text-sky-200 border-sky-700/50'
-          }`}
-        >
-          <Droplets className="w-3.5 h-3.5 text-sky-400" />
-          <span>Luz Fria</span>
-        </button>
-      </div>
-
-      {/* RGB 12-COLOR MATRIX */}
-      <div
-        className={`w-full p-3 rounded-2xl border ${
-          isLight ? 'bg-white/80 border-sky-200/90 shadow-sm' : 'bg-slate-950/80 border-slate-800'
-        }`}
-      >
-        <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-          <div className="flex items-center gap-1">
-            <Palette className="w-3.5 h-3.5 text-purple-500" />
-            <span>Cores Estáticas (RGB)</span>
+    <div className="w-full flex flex-col items-center justify-center animate-in fade-in duration-200">
+      {/* SIMULADOR DE LÂMPADA LED NO TOPO */}
+      <div className="w-full max-w-[340px] mb-3 bg-white rounded-2xl p-3.5 border-2 border-slate-200 shadow-md flex items-center justify-between text-black">
+        <div className="flex items-center gap-3">
+          <div
+            className="w-11 h-11 rounded-full flex items-center justify-center border-2 border-slate-300 transition-all duration-300 relative shadow-inner"
+            style={{
+              backgroundColor: power ? selectedColor : '#334155',
+              boxShadow: power
+                ? `0 0 ${brightness / 3}px ${brightness / 6}px ${selectedColor}88, inset 0 2px 4px rgba(255,255,255,0.6)`
+                : 'inset 0 2px 4px rgba(0,0,0,0.5)',
+            }}
+          >
+            <Lightbulb
+              className={`w-6 h-6 transition-colors duration-200 ${
+                power
+                  ? selectedColor === '#ffffff' || selectedColor === '#ffd60a'
+                    ? 'text-slate-900'
+                    : 'text-white'
+                  : 'text-slate-400'
+              }`}
+            />
+            {power && effectMode !== 'STATIC' && (
+              <span className="absolute -bottom-1 -right-1 flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-purple-600"></span>
+              </span>
+            )}
           </div>
-          <span className="text-[10px] font-normal lowercase">{colorName}</span>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-black tracking-wider text-black uppercase">
+                {power ? 'LÂMPADA LIGADA' : 'LÂMPADA DESLIGADA'}
+              </span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  power ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                }`}
+              />
+            </div>
+            <div className="text-[11px] font-bold text-slate-800">
+              {power ? `${colorName} • ${brightness}%` : 'Standby / Desligada'}
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-2.5">
-          {colorsList.map((col) => {
-            const isSelected = selectedColor === col.hex && effectMode === 'STATIC';
-            return (
+        {/* Efeito ativo */}
+        <div className="text-right">
+          <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 block">
+            MODO
+          </span>
+          <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-black bg-slate-100 text-black border border-slate-300">
+            {power ? effectMode : 'OFF'}
+          </span>
+        </div>
+      </div>
+
+      {/* CORPO DO CONTROLE REMOTO (FUNDO BRANCO ACETINADO COM LETRAS PRETAS) */}
+      <div
+        id="led-lamp-remote-casing"
+        className="w-full max-w-[340px] rounded-[38px] p-5 pt-4 pb-6 flex flex-col items-center select-none shadow-[0_20px_45px_-8px_rgba(0,0,0,0.3),0_0_0_1px_rgba(0,0,0,0.08)] bg-white border-2 border-slate-300 relative"
+      >
+        {/* Emissor IR no topo */}
+        <div className="w-14 h-2.5 bg-gradient-to-r from-zinc-800 via-zinc-950 to-zinc-800 rounded-full mb-3 shadow-inner flex items-center justify-center relative">
+          <div
+            className={`w-3 h-1.5 rounded-full transition-all duration-150 ${
+              isTransmitting
+                ? 'bg-rose-500 shadow-[0_0_8px_#f43f5e] scale-125'
+                : 'bg-rose-900/60'
+            }`}
+          />
+        </div>
+
+        {/* Cabeçalho do Controle com letras pretas em fundo branco */}
+        <div className="w-full flex items-center justify-between mb-3.5 px-2">
+          <div>
+            <span className="text-xs font-black tracking-widest text-black uppercase block leading-none">
+              LÂMPADA LED
+            </span>
+            <span className="text-[9px] font-extrabold tracking-wider text-slate-700 block mt-0.5">
+              CONTROLE RGB 24T
+            </span>
+          </div>
+          {isConfigMode && (
+            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
+              Modo Mapeamento
+            </span>
+          )}
+        </div>
+
+        {/* ========================================================================= */}
+        {/* LINHA 1: BRILHO +, BRILHO -, OFF, ON */}
+        {/* ========================================================================= */}
+        <div className="w-full grid grid-cols-4 gap-3.5 mb-3.5">
+          {/* Brilho + */}
+          <button
+            id="btn-lamp-bright-up"
+            type="button"
+            onClick={handleBrightUp}
+            title="Aumentar Brilho"
+            className={`aspect-square rounded-full bg-white border-2 border-slate-300 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.9),inset_0_-2px_3px_rgba(0,0,0,0.1)] flex flex-col items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+              'light_bright_up'
+            )}`}
+          >
+            <svg
+              className="w-6 h-6 text-black"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {/* Sun center */}
+              <circle cx="12" cy="12" r="4" />
+              {/* Sun rays */}
+              <path d="M12 2v2" />
+              <path d="M12 20v2" />
+              <path d="m4.93 4.93 1.41 1.41" />
+              <path d="m17.66 17.66 1.41 1.41" />
+              <path d="M2 12h2" />
+              <path d="M20 12h2" />
+              <path d="m6.34 17.66-1.41 1.41" />
+              <path d="m19.07 4.93-1.41 1.41" />
+              {/* Up arrow indicator */}
+              <path d="m9 13 3-3 3 3" />
+            </svg>
+          </button>
+
+          {/* Brilho - */}
+          <button
+            id="btn-lamp-bright-down"
+            type="button"
+            onClick={handleBrightDown}
+            title="Diminuir Brilho"
+            className={`aspect-square rounded-full bg-white border-2 border-slate-300 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.9),inset_0_-2px_3px_rgba(0,0,0,0.1)] flex flex-col items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+              'light_bright_down'
+            )}`}
+          >
+            <svg
+              className="w-6 h-6 text-black"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {/* Sun center */}
+              <circle cx="12" cy="12" r="4" />
+              {/* Sun rays */}
+              <path d="M12 2v2" />
+              <path d="M12 20v2" />
+              <path d="m4.93 4.93 1.41 1.41" />
+              <path d="m17.66 17.66 1.41 1.41" />
+              <path d="M2 12h2" />
+              <path d="M20 12h2" />
+              <path d="m6.34 17.66-1.41 1.41" />
+              <path d="m19.07 4.93-1.41 1.41" />
+              {/* Down arrow indicator */}
+              <path d="m9 11 3 3 3-3" />
+            </svg>
+          </button>
+
+          {/* OFF Button (Black with high contrast bold white text) */}
+          <button
+            id="btn-lamp-off"
+            type="button"
+            onClick={handlePowerOff}
+            title="Desligar"
+            className={`aspect-square rounded-full bg-black border-2 border-zinc-800 shadow-[0_3px_5px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.2),inset_0_-2px_3px_rgba(0,0,0,0.6)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+              'light_off'
+            )}`}
+          >
+            <span className="text-white font-black text-xs tracking-wider">OFF</span>
+          </button>
+
+          {/* ON Button (Red with bold white text) */}
+          <button
+            id="btn-lamp-on"
+            type="button"
+            onClick={handlePowerOn}
+            title="Ligar"
+            className={`aspect-square rounded-full bg-red-600 border-2 border-red-700 shadow-[0_3px_5px_rgba(220,38,38,0.4),inset_0_1px_2px_rgba(255,255,255,0.4),inset_0_-2px_3px_rgba(0,0,0,0.4)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+              'light_on'
+            )}`}
+          >
+            <span className="text-white font-black text-xs tracking-wider">ON</span>
+          </button>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* LINHAS 2 A 6: MATRIZ DE CORES RGB (COM PAINEL CINZA ESCURO) & FUNÇÕES */}
+        {/* ========================================================================= */}
+        <div className="w-full relative">
+          {/* Painel cinza escuro de fundo cobrindo as colunas 1 a 3 das linhas 2 a 6 e coluna 4 da linha 2 */}
+          <div className="w-full grid grid-cols-4 gap-3.5 relative">
+            {/* LINHA 2: R, G, B, W */}
+            {/* R */}
+            <button
+              id="btn-lamp-r"
+              type="button"
+              onClick={() => handleColorClick('light_color_red', 'Vermelho', '#ef4444')}
+              title="Vermelho (R)"
+              className={`aspect-square rounded-full bg-[#ef4444] border-2 border-red-600 shadow-[0_3px_5px_rgba(0,0,0,0.3),inset_0_2px_3px_rgba(255,255,255,0.4),inset_0_-2px_3px_rgba(0,0,0,0.35)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+                'light_color_red'
+              )}`}
+            >
+              <span className="text-black font-black text-base drop-shadow-sm">R</span>
+            </button>
+
+            {/* G */}
+            <button
+              id="btn-lamp-g"
+              type="button"
+              onClick={() => handleColorClick('light_color_green', 'Verde', '#22c55e')}
+              title="Verde (G)"
+              className={`aspect-square rounded-full bg-[#16a34a] border-2 border-green-700 shadow-[0_3px_5px_rgba(0,0,0,0.3),inset_0_2px_3px_rgba(255,255,255,0.4),inset_0_-2px_3px_rgba(0,0,0,0.35)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+                'light_color_green'
+              )}`}
+            >
+              <span className="text-black font-black text-base drop-shadow-sm">G</span>
+            </button>
+
+            {/* B */}
+            <button
+              id="btn-lamp-b"
+              type="button"
+              onClick={() => handleColorClick('light_color_blue', 'Azul', '#2563eb')}
+              title="Azul (B)"
+              className={`aspect-square rounded-full bg-[#2563eb] border-2 border-blue-700 shadow-[0_3px_5px_rgba(0,0,0,0.3),inset_0_2px_3px_rgba(255,255,255,0.4),inset_0_-2px_3px_rgba(0,0,0,0.35)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+                'light_color_blue'
+              )}`}
+            >
+              <span className="text-black font-black text-base drop-shadow-sm">B</span>
+            </button>
+
+            {/* W */}
+            <button
+              id="btn-lamp-w"
+              type="button"
+              onClick={() => handleColorClick('light_color_white', 'Branco Puro', '#ffffff')}
+              title="Branco (W)"
+              className={`aspect-square rounded-full bg-white border-2 border-slate-300 shadow-[0_3px_5px_rgba(0,0,0,0.25),inset_0_2px_3px_rgba(255,255,255,0.9),inset_0_-2px_3px_rgba(0,0,0,0.15)] flex items-center justify-center transition-all active:scale-90 active:shadow-inner ${getButtonConfigRing(
+                'light_color_white'
+              )}`}
+            >
+              <span className="text-black font-black text-base">W</span>
+            </button>
+          </div>
+
+          {/* ÁREA INFERIOR COM O PAINEL CINZA EM FORMA ELEGANTE */}
+          <div className="w-full mt-3.5 relative">
+            {/* Fundo cinza escuro para as colunas 1, 2, 3 (exatamente como no controle físico original) */}
+            <div className="absolute top-0 bottom-0 left-0 w-[73.5%] bg-[#6b7280] rounded-[22px] shadow-inner -z-0 border border-[#52525b]" />
+
+            <div className="w-full grid grid-cols-4 gap-3.5 relative z-10 p-1 pl-1">
+              {/* LINHA 3 */}
+              {/* Coral / Vermelho Claro */}
               <button
-                key={col.key}
-                id={`btn-${col.key}`}
-                onClick={() => handleColorPick(col)}
-                className={`h-10 rounded-xl border-2 transition-all active:scale-90 flex items-center justify-center shadow-sm relative ${
-                  isConfigMode
-                    ? 'ring-2 ring-amber-400'
-                    : isSelected
-                    ? 'scale-105 ring-2 ring-purple-500 border-white shadow-md'
-                    : 'border-transparent hover:scale-105'
-                }`}
-                style={{ backgroundColor: col.hex }}
-                title={col.name}
+                id="btn-lamp-b1"
+                type="button"
+                onClick={() => handleColorClick('light_color_b1', 'Coral', '#ff453a')}
+                title="Coral / Vermelho Claro"
+                className={`aspect-square rounded-full bg-[#ff453a] border border-red-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b1'
+                )}`}
               >
-                {isSelected && (
-                  <span className="w-2 h-2 rounded-full bg-white shadow-sm ring-1 ring-black/30" />
+                {selectedColor === '#ff453a' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
                 )}
               </button>
-            );
-          })}
+
+              {/* Verde Claro / Menta */}
+              <button
+                id="btn-lamp-b2"
+                type="button"
+                onClick={() => handleColorClick('light_color_b2', 'Verde Claro', '#30d158')}
+                title="Verde Claro"
+                className={`aspect-square rounded-full bg-[#30d158] border border-emerald-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b2'
+                )}`}
+              >
+                {selectedColor === '#30d158' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Azul Claro / Celeste */}
+              <button
+                id="btn-lamp-b3"
+                type="button"
+                onClick={() => handleColorClick('light_color_b3', 'Azul Celeste', '#0a84ff')}
+                title="Azul Celeste"
+                className={`aspect-square rounded-full bg-[#0a84ff] border border-blue-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b3'
+                )}`}
+              >
+                {selectedColor === '#0a84ff' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* FLASH (Coluna 4 - fora do painel cinza, sobre o fundo branco, letras pretas em botão cinza claro) */}
+              <button
+                id="btn-lamp-flash"
+                type="button"
+                onClick={() => handleEffectClick('light_flash', 'FLASH')}
+                title="Modo Flash"
+                className={`aspect-square rounded-full bg-[#9ca3af] border border-slate-400 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.6)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_flash'
+                )}`}
+              >
+                <span className="text-black font-black text-[10px] tracking-tight">FLASH</span>
+              </button>
+
+              {/* LINHA 4 */}
+              {/* Laranja */}
+              <button
+                id="btn-lamp-b4"
+                type="button"
+                onClick={() => handleColorClick('light_color_b4', 'Laranja', '#ff9500')}
+                title="Laranja"
+                className={`aspect-square rounded-full bg-[#ff9500] border border-orange-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b4'
+                )}`}
+              >
+                {selectedColor === '#ff9500' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Ciano / Turquesa */}
+              <button
+                id="btn-lamp-b5"
+                type="button"
+                onClick={() => handleColorClick('light_color_b5', 'Ciano', '#00c7be')}
+                title="Ciano"
+                className={`aspect-square rounded-full bg-[#00c7be] border border-cyan-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b5'
+                )}`}
+              >
+                {selectedColor === '#00c7be' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Roxo Escuro / Violeta */}
+              <button
+                id="btn-lamp-b6"
+                type="button"
+                onClick={() => handleColorClick('light_color_b6', 'Violeta', '#5856d6')}
+                title="Violeta"
+                className={`aspect-square rounded-full bg-[#5856d6] border border-indigo-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b6'
+                )}`}
+              >
+                {selectedColor === '#5856d6' && power && (
+                  <Check className="w-4 h-4 text-white stroke-[3]" />
+                )}
+              </button>
+
+              {/* STROBE */}
+              <button
+                id="btn-lamp-strobe"
+                type="button"
+                onClick={() => handleEffectClick('light_strobe', 'STROBE')}
+                title="Modo Strobe"
+                className={`aspect-square rounded-full bg-[#9ca3af] border border-slate-400 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.6)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_strobe'
+                )}`}
+              >
+                <span className="text-black font-black text-[9px] tracking-tight">STROBE</span>
+              </button>
+
+              {/* LINHA 5 */}
+              {/* Âmbar / Laranja Claro */}
+              <button
+                id="btn-lamp-b7"
+                type="button"
+                onClick={() => handleColorClick('light_color_b7', 'Âmbar', '#ffb340')}
+                title="Âmbar"
+                className={`aspect-square rounded-full bg-[#ffb340] border border-amber-500 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b7'
+                )}`}
+              >
+                {selectedColor === '#ffb340' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Azul Oceano */}
+              <button
+                id="btn-lamp-b8"
+                type="button"
+                onClick={() => handleColorClick('light_color_b8', 'Azul Oceano', '#007aff')}
+                title="Azul Oceano"
+                className={`aspect-square rounded-full bg-[#007aff] border border-blue-600 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b8'
+                )}`}
+              >
+                {selectedColor === '#007aff' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Ameixa / Magenta Escuro */}
+              <button
+                id="btn-lamp-b9"
+                type="button"
+                onClick={() => handleColorClick('light_color_b9', 'Ameixa', '#78448a')}
+                title="Ameixa"
+                className={`aspect-square rounded-full bg-[#78448a] border border-purple-800 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b9'
+                )}`}
+              >
+                {selectedColor === '#78448a' && power && (
+                  <Check className="w-4 h-4 text-white stroke-[3]" />
+                )}
+              </button>
+
+              {/* FADE */}
+              <button
+                id="btn-lamp-fade"
+                type="button"
+                onClick={() => handleEffectClick('light_fade', 'FADE')}
+                title="Modo Fade"
+                className={`aspect-square rounded-full bg-[#9ca3af] border border-slate-400 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.6)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_fade'
+                )}`}
+              >
+                <span className="text-black font-black text-[10px] tracking-tight">FADE</span>
+              </button>
+
+              {/* LINHA 6 */}
+              {/* Amarelo */}
+              <button
+                id="btn-lamp-b10"
+                type="button"
+                onClick={() => handleColorClick('light_color_b10', 'Amarelo', '#ffd60a')}
+                title="Amarelo"
+                className={`aspect-square rounded-full bg-[#ffd60a] border border-yellow-400 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.6)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b10'
+                )}`}
+              >
+                {selectedColor === '#ffd60a' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* Azul Marinho Escuro */}
+              <button
+                id="btn-lamp-b11"
+                type="button"
+                onClick={() => handleColorClick('light_color_b11', 'Azul Escuro', '#1a365d')}
+                title="Azul Escuro"
+                className={`aspect-square rounded-full bg-[#1a365d] border border-slate-800 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.2)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b11'
+                )}`}
+              >
+                {selectedColor === '#1a365d' && power && (
+                  <Check className="w-4 h-4 text-white stroke-[3]" />
+                )}
+              </button>
+
+              {/* Rosa / Pink */}
+              <button
+                id="btn-lamp-b12"
+                type="button"
+                onClick={() => handleColorClick('light_color_b12', 'Rosa', '#e64980')}
+                title="Rosa"
+                className={`aspect-square rounded-full bg-[#e64980] border border-pink-600 shadow-[0_2px_4px_rgba(0,0,0,0.35),inset_0_1px_2px_rgba(255,255,255,0.4)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_color_b12'
+                )}`}
+              >
+                {selectedColor === '#e64980' && power && (
+                  <Check className="w-4 h-4 text-black stroke-[3]" />
+                )}
+              </button>
+
+              {/* SMOOTH */}
+              <button
+                id="btn-lamp-smooth"
+                type="button"
+                onClick={() => handleEffectClick('light_smooth', 'SMOOTH')}
+                title="Modo Smooth"
+                className={`aspect-square rounded-full bg-[#9ca3af] border border-slate-400 shadow-[0_3px_5px_rgba(0,0,0,0.2),inset_0_1px_2px_rgba(255,255,255,0.6)] flex items-center justify-center transition-all active:scale-90 ${getButtonConfigRing(
+                  'light_smooth'
+                )}`}
+              >
+                <span className="text-black font-black text-[9px] tracking-tight">SMOOTH</span>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* DYNAMIC EFFECTS (FLASH, STROBE, FADE, SMOOTH) */}
-      <div className="w-full grid grid-cols-4 gap-1.5">
-        {[
-          { name: 'FLASH', key: 'light_flash' },
-          { name: 'STROBE', key: 'light_strobe' },
-          { name: 'FADE', key: 'light_fade' },
-          { name: 'SMOOTH', key: 'light_smooth' },
-        ].map((eff) => (
-          <button
-            key={eff.key}
-            id={`btn-${eff.key}`}
-            onClick={() => handleEffect(eff.name as any, eff.key)}
-            className={`py-2 rounded-xl border text-[11px] font-bold transition-all active:scale-90 ${
-              isConfigMode
-                ? isLight
-                  ? 'border-amber-400 bg-amber-50 text-amber-800'
-                  : 'border-amber-400/80 bg-slate-900 text-amber-300'
-              : effectMode === eff.name
-              ? 'bg-purple-600 text-white shadow-md border-purple-500'
-              : isLight
-              ? 'bg-white hover:bg-purple-50 text-purple-700 border-purple-200 shadow-sm'
-              : 'bg-slate-900 hover:bg-slate-800 text-purple-300 border-slate-800'
-            }`}
-          >
-            {eff.name}
-          </button>
-        ))}
-      </div>
-
-      {/* SLEEP TIMERS */}
-      <div className="w-full grid grid-cols-4 gap-1.5">
-        {[
-          { label: '30 min', min: 30, key: 'light_timer_30' },
-          { label: '1 hora', min: 60, key: 'light_timer_60' },
-          { label: '2 horas', min: 120, key: 'light_timer_120' },
-          { label: '4 horas', min: 240, key: 'light_timer_240' },
-        ].map((t) => (
-          <button
-            key={t.key}
-            id={`btn-${t.key}`}
-            onClick={() => handleTimer(t.min, t.key)}
-            className={`py-1.5 rounded-lg border text-[10px] font-medium transition-all active:scale-90 ${
-              timerMinutes === t.min
-                ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm font-bold'
-                : isLight
-                ? 'bg-sky-50/80 text-slate-600 border-sky-200/80 hover:bg-sky-100'
-                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+        {/* Rodapé do Controle Remoto com etiqueta em preto */}
+        <div className="mt-4 text-center">
+          <span className="text-[10px] font-black tracking-widest text-slate-900 uppercase">
+            INFRARED 24-KEY CONTROLLER
+          </span>
+        </div>
       </div>
     </div>
   );
